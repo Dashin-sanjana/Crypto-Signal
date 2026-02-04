@@ -1,0 +1,197 @@
+.card {
+  background: var(--bg-secondary);
+  border: 2px solid;
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  transition: all var(--transition-base);
+  animation: fadeIn var(--transition-base);
+}
+
+.card.long {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.1);
+}
+
+.card.long:hover {
+  box-shadow: var(--shadow-glow-green);
+  transform: translateY(-4px);
+}
+
+.card.short {
+  border-color: var(--red-primary);
+  box-shadow: 0 0 20px rgba(255, 68, 68, 0.1);
+}
+
+.card.short:hover {
+  box-shadow: var(--shadow-glow-red);
+  transform: translateY(-4px);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.type {
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.long .type {
+  background: var(--green-primary);
+  color: var(--bg-primary);
+}
+
+.short .type {
+  background: var(--red-primary);
+  color: white;
+}
+
+.symbol {
+  font-size: 1.125rem;
+  font-weight: 700;
+  flex: 1;
+}
+
+.closeBtn {
+  width: 24px;
+  height: 24px;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.closeBtn:hover {
+  background: var(--red-primary);
+  color: white;
+}
+
+.prices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.priceItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stats {
+  display: flex;
+  justify-content: space-around;
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.statValue {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.long .statValue {
+  color: var(--green-primary);
+}
+
+.short .statValue {
+  color: var(--red-primary);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--glass-border);
+}
+
+.time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.copyBtn {
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.copyBtn:hover {
+  background: var(--blue-primary);
+  border-color: var(--blue-primary);
+  color: var(--bg-primary);
+}
+
+.footerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.actionBtn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.buyBtn {
+  background: var(--green-primary);
+}
+
+.sellBtn {
+  background: var(--red-primary);
+}
+
+.actionBtn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}

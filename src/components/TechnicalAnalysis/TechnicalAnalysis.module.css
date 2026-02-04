@@ -1,0 +1,28 @@
+.widget {
+  padding: 15px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  margin-bottom: 20px;
+  min-height: 400px; /* Minimum height for the widget */
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  margin-bottom: 15px;
+}
+
+.title {
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.container {
+  flex: 1;
+  border-radius: 8px;
+  overflow: hidden;
+}

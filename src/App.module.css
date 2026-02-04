@@ -1,0 +1,80 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+.mainContainer {
+  display: grid;
+  grid-template-columns: 320px 1fr 400px;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  flex: 1;
+  height: calc(100vh - 80px); /* Adjust based on header height */
+  overflow: hidden;
+}
+
+.leftSidebar, .rightSidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  overflow-y: auto;
+  padding-right: 5px; /* Space for custom scrollbar */
+}
+
+/* Custom scrollbar for sidebars */
+.leftSidebar::-webkit-scrollbar,
+.rightSidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.leftSidebar::-webkit-scrollbar-track,
+.rightSidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.leftSidebar::-webkit-scrollbar-thumb,
+.rightSidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.chartContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  min-width: 0;
+  height: 100%;
+}
+
+.scannerWrapper {
+  margin-top: auto;
+}
+
+.signalsListWrapper {
+  height: 300px;
+  flex-shrink: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1600px) {
+  .mainContainer {
+    grid-template-columns: 280px 1fr 350px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .mainContainer {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    overflow-y: auto;
+  }
+  
+  .leftSidebar, .rightSidebar, .chartContainer {
+    width: 100%;
+    overflow: visible;
+    height: auto;
+  }
+}
