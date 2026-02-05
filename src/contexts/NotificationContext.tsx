@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useCallback, ReactNode } from 'react';
-import { toast, TypeOptions } from 'react-toastify';
+import { TypeOptions } from 'react-toastify';
 import { NOTIFICATION_SOUNDS } from '../utils/constants';
 import { supportsNotifications, playSound } from '../utils/helpers';
+import { notificationManager } from '../utils/notificationManager';
+import { showToast } from '../utils/toastHelper';
 
 interface NotificationContextType {
   sendNotification: (title: string, body?: string, icon?: string) => void;
@@ -36,50 +38,65 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     }
   }, []);
 
-  // Send toast notification
-  const sendToast = useCallback((message: string, type: TypeOptions = 'info') => {
-    toast(message, {
-      type,
-      position: 'bottom-right',
-      autoClose: 5000,
-      hideProgressBar: false,
-      closeOnClick: true,
-      pauseOnHover: true,
-      draggable: true
-    });
+  // Send toast notification (with notification manager check)
+  const sendToast = useCallback((message: string, type: TypeOptions = 'info', key?: string, notificationType?: 'signal' | 'trade' | 'position' | 'news', data?: any) => {
+    showToast(message, type, {}, key, notificationType, data);
   }, []);
 
-  // Notify signal
+  // Notify signal (with throttling)
   const notifySignal = useCallback((signal: any) => {
     const { type, symbol, entry, strength } = signal;
+    const key = `signal_${symbol}_${type}`;
+    
+    // Check if should notify
+    if (!notificationManager.shouldNotify('signal', key, signal)) {
+      return; // Throttled or filtered
+    }
+    
     const title = `${type} Signal - ${symbol}`;
     const body = `Entry: $${entry.toFixed(2)} | Strength: ${strength}/10`;
     
-    // Browser notification
-    sendNotification(title, body);
+    // Browser notification (only for important signals)
+    if (notificationManager.isImportant('signal', signal)) {
+      sendNotification(title, body);
+    }
     
-    // Toast notification
+    // Toast notification (only if enabled and important)
     const toastType: TypeOptions = type === 'LONG' ? 'success' : 'error';
-    sendToast(`${title}\n${body}`, toastType);
+    sendToast(`${title} - ${body}`, toastType, key, 'signal', signal);
     
-    // Sound alert
-    const soundPath = type === 'LONG' 
-      ? NOTIFICATION_SOUNDS.bullish 
-      : NOTIFICATION_SOUNDS.bearish;
-    playSound(soundPath);
+    // Sound alert (only for important signals)
+    if (notificationManager.isImportant('signal', signal)) {
+      const soundPath = type === 'LONG' 
+        ? NOTIFICATION_SOUNDS.bullish 
+        : NOTIFICATION_SOUNDS.bearish;
+      playSound(soundPath);
+    }
   }, [sendNotification, sendToast]);
 
-  // Notify news
+  // Notify news (with throttling)
   const notifyNews = useCallback((newsItem: any) => {
     const { title, source, sentiment } = newsItem;
+    const key = `news_${source}_${Date.now()}`;
     
-    sendNotification(`${source} - ${sentiment.toUpperCase()}`, title);
+    // Check if should notify
+    if (!notificationManager.shouldNotify('news', key, newsItem)) {
+      return; // Throttled or filtered
+    }
+    
+    // Browser notification (only for important news)
+    if (notificationManager.isImportant('news', newsItem)) {
+      sendNotification(`${source} - ${sentiment.toUpperCase()}`, title);
+    }
     
     const toastType: TypeOptions = sentiment === 'bullish' ? 'success' : 
                       sentiment === 'bearish' ? 'warning' : 'info';
     sendToast(`${source}: ${title}`, toastType);
     
-    playSound(NOTIFICATION_SOUNDS.news);
+    // Sound (only for important news)
+    if (notificationManager.isImportant('news', newsItem)) {
+      playSound(NOTIFICATION_SOUNDS.news);
+    }
   }, [sendNotification, sendToast]);
 
   const value = {

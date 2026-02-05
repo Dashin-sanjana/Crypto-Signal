@@ -154,59 +154,102 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     setLiquidationPrice(null); // Reset liquidation on symbol change
   }, [selectedSymbol, setupTimeframe, fetchKlineData]);
 
-  // Update TP/SL on every price tick
+  // Update TP/SL on every price tick or when symbol/direction changes
   useEffect(() => {
-    const currentPrice = prices[selectedSymbol]?.price;
-    if (currentPrice && volatility > 0) {
-      let sl, tp1, tp2;
-
-      if (tradeDirection === 'BUY') {
-        if (liquidationPrice && liquidationPrice < currentPrice) {
-          // Safe SL: Positioned at least 20% away from liquidation OR standard ATR
-          const liqDistance = currentPrice - liquidationPrice;
-          const safeBuffer = liqDistance * 0.2; 
-          sl = liquidationPrice + safeBuffer;
-          
-          tp1 = currentPrice + (Math.abs(currentPrice - sl) * 1.5);
-          tp2 = currentPrice + (Math.abs(currentPrice - sl) * 3);
-        } else {
-          // Standard Stable Logic for BUY
-          sl = currentPrice - (volatility * 2.5);
-          tp1 = currentPrice + (volatility * 1.5);
-          tp2 = currentPrice + (volatility * 3.5);
-        }
-      } else {
-        // SELL Direction Logic
-        if (liquidationPrice && liquidationPrice > currentPrice) {
-          const liqDistance = liquidationPrice - currentPrice;
-          const safeBuffer = liqDistance * 0.2;
-          sl = liquidationPrice - safeBuffer;
-          
-          tp1 = currentPrice - (Math.abs(sl - currentPrice) * 1.5);
-          tp2 = currentPrice - (Math.abs(sl - currentPrice) * 3);
-        } else {
-          // Standard Stable Logic for SELL
-          sl = currentPrice + (volatility * 2.5);
-          tp1 = currentPrice - (volatility * 1.5);
-          tp2 = currentPrice - (volatility * 3.5);
+    const updateTPSL = async () => {
+      // Try to get current price from WebSocket first
+      let currentPrice = prices[selectedSymbol]?.price;
+      
+      // Fallback: Fetch current price from API if WebSocket price not available
+      if (!currentPrice) {
+        try {
+          const klines = await fetchKlineData(selectedSymbol, '1m', 1);
+          if (klines.length > 0) {
+            currentPrice = klines[klines.length - 1].close;
+          }
+        } catch (error) {
+          console.warn(`Could not fetch price for ${selectedSymbol}:`, error);
+          return; // Can't calculate TP/SL without price
         }
       }
-      
-      const risk = Math.abs(currentPrice - sl);
-      const rr = risk > 0 ? (Math.abs(tp2 - currentPrice)) / risk : 0;
 
-      setTpslData({
-        symbol: selectedSymbol,
-        entry: currentPrice,
-        tp1,
-        tp2,
-        sl,
-        rr,
-        direction: tradeDirection,
-        timestamp: Date.now()
-      });
-    }
-  }, [prices, selectedSymbol, volatility, liquidationPrice, tradeDirection]);
+      // Ensure we have volatility (recalculate if needed)
+      let currentVolatility = volatility;
+      if (currentVolatility <= 0 && currentPrice) {
+        try {
+          const klines = await fetchKlineData(selectedSymbol, setupTimeframe, 50);
+          if (klines.length > 0) {
+            const ranges = klines.slice(-14).map(k => k.high - k.low);
+            const avgRange = ranges.reduce((a, b) => a + b, 0) / ranges.length;
+            currentVolatility = Math.max(avgRange, currentPrice * 0.01);
+          }
+        } catch (error) {
+          console.warn(`Could not calculate volatility for ${selectedSymbol}:`, error);
+          // Use default volatility (1% of price)
+          currentVolatility = currentPrice * 0.01;
+        }
+      }
+
+      if (currentPrice && currentVolatility > 0) {
+        let sl, tp1, tp2;
+
+        if (tradeDirection === 'BUY') {
+          if (liquidationPrice && liquidationPrice < currentPrice) {
+            // Safe SL: Positioned at least 20% away from liquidation OR standard ATR
+            const liqDistance = currentPrice - liquidationPrice;
+            const safeBuffer = liqDistance * 0.2; 
+            sl = liquidationPrice + safeBuffer;
+            
+            tp1 = currentPrice + (Math.abs(currentPrice - sl) * 1.5);
+            tp2 = currentPrice + (Math.abs(currentPrice - sl) * 3);
+          } else {
+            // Standard Stable Logic for BUY
+            sl = currentPrice - (currentVolatility * 2.5);
+            tp1 = currentPrice + (currentVolatility * 1.5);
+            tp2 = currentPrice + (currentVolatility * 3.5);
+          }
+        } else {
+          // SELL Direction Logic
+          if (liquidationPrice && liquidationPrice > currentPrice) {
+            const liqDistance = liquidationPrice - currentPrice;
+            const safeBuffer = liqDistance * 0.2;
+            sl = liquidationPrice - safeBuffer;
+            
+            tp1 = currentPrice - (Math.abs(sl - currentPrice) * 1.5);
+            tp2 = currentPrice - (Math.abs(sl - currentPrice) * 3);
+          } else {
+            // Standard Stable Logic for SELL
+            sl = currentPrice + (currentVolatility * 2.5);
+            tp1 = currentPrice - (currentVolatility * 1.5);
+            tp2 = currentPrice - (currentVolatility * 3.5);
+          }
+        }
+        
+        const risk = Math.abs(currentPrice - sl);
+        const rr = risk > 0 ? (Math.abs(tp2 - currentPrice)) / risk : 0;
+
+        setTpslData({
+          symbol: selectedSymbol,
+          entry: currentPrice,
+          tp1,
+          tp2,
+          sl,
+          rr,
+          direction: tradeDirection,
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    updateTPSL();
+    
+    // Also update when price changes
+    const priceInterval = setInterval(() => {
+      updateTPSL();
+    }, 5000); // Update every 5 seconds as fallback
+
+    return () => clearInterval(priceInterval);
+  }, [prices, selectedSymbol, volatility, liquidationPrice, tradeDirection, setupTimeframe, fetchKlineData]);
 
   // Connect to Binance WebSocket for real-time prices
   const connectWebSocket = useCallback((symbol: string) => {
@@ -243,23 +286,54 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     return ws;
   }, []);
 
-  // Manage WebSocket connections based on watchlist
+  // Manage WebSocket connections based on watchlist + selected symbol
   useEffect(() => {
     const newConnections: Record<string, WebSocket> = { ...activeConnections };
+    const symbolsToConnect = new Set<string>();
     
-    // Connect to new symbols
+    // Add watchlist symbols
     watchlist.forEach(({ symbol }) => {
+      symbolsToConnect.add(symbol);
+    });
+    
+    // CRITICAL: Always connect to selected symbol even if not in watchlist
+    if (selectedSymbol) {
+      symbolsToConnect.add(selectedSymbol);
+    }
+    
+    // Connect to all required symbols
+    symbolsToConnect.forEach((symbol) => {
       if (!newConnections[symbol]) {
+        console.log(`Connecting WebSocket for ${symbol}`);
         newConnections[symbol] = connectWebSocket(symbol);
+      }
+    });
+
+    // Close connections for symbols no longer needed (but keep selectedSymbol)
+    Object.keys(newConnections).forEach((symbol) => {
+      const isInWatchlist = watchlist.some(w => w.symbol === symbol);
+      const isSelected = symbol === selectedSymbol;
+      if (!isInWatchlist && !isSelected) {
+        // Close connection if not needed
+        const ws = newConnections[symbol];
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+        delete newConnections[symbol];
       }
     });
 
     setActiveConnections(newConnections);
 
     return () => {
-      // Cleanup on unmount
+      // Cleanup on unmount - close all connections
+      Object.values(newConnections).forEach(ws => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
     };
-  }, [watchlist, connectWebSocket]);
+  }, [watchlist, selectedSymbol, connectWebSocket]);
 
   const addToWatchlist = (symbolInfo: SymbolInfo) => {
     if (!watchlist.find(s => s.symbol === symbolInfo.symbol)) {

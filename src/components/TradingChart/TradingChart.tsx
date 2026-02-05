@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { usePriceContext } from '../../contexts/PriceContext';
 import { TIMEFRAMES } from '../../utils/constants';
-import styles from './TradingChart.module.css';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 declare global {
   interface Window {
@@ -52,25 +53,32 @@ const TradingChart = () => {
   }, [selectedSymbol, timeframe]);
 
   return (
-    <div className={`${styles.chartContainer} glass-panel`}>
-      <div className={styles.header}>
-        <h3 className={styles.title}>{selectedSymbol}</h3>
-        
-        <div className={styles.timeframes}>
+    <Card className="flex h-full flex-col overflow-hidden border-border bg-card">
+      <CardHeader className="flex flex-row items-center justify-between border-b px-4 py-3 space-y-0">
+        <CardTitle className="text-lg font-bold">{selectedSymbol}</CardTitle>
+
+        <div className="flex bg-muted rounded-md p-0.5">
           {TIMEFRAMES.map(({ label, value }) => (
             <button
               key={value}
-              className={`${styles.timeframeBtn} ${timeframe === value ? styles.active : ''}`}
+              className={cn(
+                "px-3 py-1 text-xs font-bold rounded-sm transition-all",
+                timeframe === value
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
               onClick={() => setTimeframe(value)}
             >
               {label}
             </button>
           ))}
         </div>
-      </div>
-      
-      <div id="tradingview_advanced_chart" ref={containerRef} className={styles.chart} />
-    </div>
+      </CardHeader>
+
+      <CardContent className="flex-1 p-0 relative min-h-[400px]">
+        <div id="tradingview_advanced_chart" ref={containerRef} className="h-full w-full absolute inset-0" />
+      </CardContent>
+    </Card>
   );
 };
 
