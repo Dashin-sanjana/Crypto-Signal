@@ -73,29 +73,18 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.timeframeToggle {
+.predictionBadge {
   display: flex;
-  gap: 0.25rem;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 0.2rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(161, 161, 180, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-}
-
-.toggleBtn {
-  padding: 0.4rem 0.75rem;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
   font-size: 0.75rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.toggleBtn.active {
-  background: var(--green-primary);
-  color: var(--bg-primary);
+  font-weight: 800;
+  letter-spacing: 0.05em;
 }
 
 .directionToggle {

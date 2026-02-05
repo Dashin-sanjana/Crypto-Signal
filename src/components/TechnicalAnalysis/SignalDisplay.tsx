@@ -7,8 +7,6 @@ const SignalDisplay: React.FC = () => {
   const { 
     tpslData,
     selectedSymbol, 
-    setupTimeframe, 
-    setSetupTimeframe,
     tradeDirection,
     setTradeDirection
   } = usePriceContext();
@@ -46,16 +44,8 @@ const SignalDisplay: React.FC = () => {
       </div>
 
       <div className={styles.controls}>
-        <div className={styles.timeframeToggle}>
-          {['1m', '5m'].map((tf) => (
-            <button
-              key={tf}
-              className={`${styles.toggleBtn} ${setupTimeframe === tf ? styles.active : ''}`}
-              onClick={() => setSetupTimeframe(tf)}
-            >
-              {tf}
-            </button>
-          ))}
+        <div className={styles.predictionBadge}>
+          <span>⏱️</span> 5M PREDICTION
         </div>
 
         <div className={styles.directionToggle}>
@@ -120,7 +110,22 @@ const SignalDisplay: React.FC = () => {
           </span>
         </div>
         
-        <button className={`${styles.actionBtn} ${isBuy ? styles.btnBuy : styles.btnSell}`}>
+        <button 
+          className={`${styles.actionBtn} ${isBuy ? styles.btnBuy : styles.btnSell}`}
+          onClick={() => {
+            // Visual feedback for live entry
+            const btn = document.activeElement as HTMLElement;
+            if (btn) {
+              const originalText = btn.innerText;
+              btn.innerText = '✅ ENTRY SENT';
+              btn.style.filter = 'brightness(1.5)';
+              setTimeout(() => {
+                btn.innerText = originalText;
+                btn.style.filter = '';
+              }, 1500);
+            }
+          }}
+        >
           {isBuy ? '🚀 BUY NOW' : '📉 SELL NOW'}
         </button>
       </div>

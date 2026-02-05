@@ -81,7 +81,7 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
   const [timeframe, setTimeframe] = useState<string>('5m');
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [allSymbols, setAllSymbols] = useState<SymbolInfo[]>([]);
-  const [setupTimeframe, setSetupTimeframe] = useState<string>('5m');
+  const [setupTimeframe, setSetupTimeframe] = useState<string>('5m'); // Strictly 5m for predictions
   const [volatility, setVolatility] = useState<number>(0.01); // Default non-zero
   const [liquidationPrice, setLiquidationPrice] = useState<number | null>(null);
   const [tpslData, setTpslData] = useState<TPSLData | null>(null);
