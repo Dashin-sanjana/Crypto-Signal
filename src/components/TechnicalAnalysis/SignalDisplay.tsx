@@ -5,10 +5,12 @@ import styles from './SignalDisplay.module.css';
 
 const SignalDisplay: React.FC = () => {
   const { 
-    tpslData, 
+    tpslData,
     selectedSymbol, 
     setupTimeframe, 
-    setSetupTimeframe
+    setSetupTimeframe,
+    tradeDirection,
+    setTradeDirection
   } = usePriceContext();
 
   if (!tpslData || tpslData.symbol !== selectedSymbol) {
@@ -20,19 +22,26 @@ const SignalDisplay: React.FC = () => {
   }
 
   const { entry, tp1, tp2, sl, rr } = tpslData;
-  const tp1Percent = Math.abs((tp1 - entry) / entry) * 100;
-  const tp2Percent = Math.abs((tp2 - entry) / entry) * 100;
-  const slPercent = Math.abs((entry - sl) / entry) * 100;
+  const isBuy = tradeDirection === 'BUY';
+  const tp1Percent = entry > 0 ? Math.abs((tp1 - entry) / entry) * 100 : 0;
+  const tp2Percent = entry > 0 ? Math.abs((tp2 - entry) / entry) * 100 : 0;
+  const slPercent = entry > 0 ? Math.abs((entry - sl) / entry) * 100 : 0;
 
   return (
     <div className={styles.signalDisplay}>
       <div className={styles.header}>
         <div className={styles.title}>
-          <span>🎯</span> Live Setup
+          <span>🎯</span> {selectedSymbol} Setup
         </div>
         <div className={styles.statusWrapper}>
-          <div className={styles.liveIndicator}></div>
-          <div className={styles.badge}>Live Entry</div>
+          <div className={`${styles.liveIndicator} ${isBuy ? styles.indicatorLong : styles.indicatorShort}`}></div>
+          <div className={styles.badge} style={{ 
+            background: isBuy ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)',
+            color: isBuy ? 'var(--green-primary)' : 'var(--red-primary)',
+            borderColor: isBuy ? 'rgba(0, 255, 136, 0.2)' : 'rgba(255, 68, 68, 0.2)'
+          }}>
+            {tradeDirection} SIGNAL
+          </div>
         </div>
       </div>
 
@@ -48,51 +57,71 @@ const SignalDisplay: React.FC = () => {
             </button>
           ))}
         </div>
+
+        <div className={styles.directionToggle}>
+          <button 
+            className={`${styles.dirBtn} ${isBuy ? styles.buyActive : ''}`}
+            onClick={() => setTradeDirection('BUY')}
+          >
+            BUY
+          </button>
+          <button 
+            className={`${styles.dirBtn} ${!isBuy ? styles.sellActive : ''}`}
+            onClick={() => setTradeDirection('SELL')}
+          >
+            SELL
+          </button>
+        </div>
       </div>
 
       <div className={styles.levels}>
-        {/* ... Entry remains same ... */}
         <div className={`${styles.levelRow} ${styles.entry}`}>
-          <div className={styles.levelInfo}>
-            <span className={styles.label}>Market Entry</span>
-            <span className={styles.value}>${formatPrice(entry)}</span>
-          </div>
-          <span className={styles.badge}>Current</span>
+          <span className={styles.label}>Entry</span>
+          <span className={styles.value}>${formatPrice(entry || 0)}</span>
+          <span className={styles.markerBadge}>MARKET</span>
         </div>
         
         <div className={`${styles.levelRow} ${styles.tp1}`}>
-          <div className={styles.levelInfo}>
-            <span className={styles.label}>Take Profit 1 (Safe)</span>
-            <span className={styles.value}>${formatPrice(tp1)}</span>
-          </div>
-          <span className={styles.percentage}>+{tp1Percent.toFixed(2)}%</span>
+          <span className={styles.label}>Target 1</span>
+          <span className={styles.value} style={{ color: isBuy ? '#10b981' : '#ff4444' }}>
+            ${formatPrice(tp1 || 0)}
+          </span>
+          <span className={styles.percentage} style={{ color: isBuy ? '#10b981' : '#ff4444' }}>
+            {isBuy ? '+' : '-'}{tp1Percent.toFixed(2)}%
+          </span>
         </div>
 
         <div className={`${styles.levelRow} ${styles.tp2}`}>
-          <div className={styles.levelInfo}>
-            <span className={styles.label}>Take Profit 2 (Target)</span>
-            <span className={styles.value}>${formatPrice(tp2)}</span>
-          </div>
-          <span className={styles.percentage}>+{tp2Percent.toFixed(2)}%</span>
+          <span className={styles.label}>Target 2</span>
+          <span className={styles.value} style={{ color: isBuy ? '#00ff88' : '#ff6b6b' }}>
+            ${formatPrice(tp2 || 0)}
+          </span>
+          <span className={styles.percentage} style={{ color: isBuy ? '#00ff88' : '#ff6b6b' }}>
+            {isBuy ? '+' : '-'}{tp2Percent.toFixed(2)}%
+          </span>
         </div>
 
         <div className={`${styles.levelRow} ${styles.sl}`}>
-          <div className={styles.levelInfo}>
-            <span className={styles.label}>Stop Loss Protection</span>
-            <span className={styles.value}>${sl ? formatPrice(sl) : '0.00'}</span>
-          </div>
-          <span className={styles.percentage}>-{slPercent.toFixed(2)}%</span>
+          <span className={styles.label}>Stop Loss</span>
+          <span className={styles.value} style={{ color: isBuy ? '#ff4444' : '#10b981' }}>
+            ${formatPrice(sl || 0)}
+          </span>
+          <span className={styles.percentage} style={{ color: isBuy ? '#ff4444' : '#10b981' }}>
+            {isBuy ? '-' : '+'}{slPercent.toFixed(2)}%
+          </span>
         </div>
       </div>
 
       <div className={styles.footer}>
         <div className={styles.rrCard}>
-          <span className={styles.rrLabel}>Risk : Reward Ratio</span>
-          <span className={styles.rrValue}>1:{rr.toFixed(2)}</span>
+          <span className={styles.rrLabel}>R/R Ratio</span>
+          <span className={styles.rrValue}>
+            1:{typeof rr === 'number' ? rr.toFixed(2) : '0.00'}
+          </span>
         </div>
         
-        <button className={styles.actionBtn}>
-          🚀 Execute Trade
+        <button className={`${styles.actionBtn} ${isBuy ? styles.btnBuy : styles.btnSell}`}>
+          {isBuy ? '🚀 BUY NOW' : '📉 SELL NOW'}
         </button>
       </div>
     </div>

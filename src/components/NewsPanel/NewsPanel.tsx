@@ -9,8 +9,8 @@ const NewsPanel = () => {
 
   const getSentimentColor = (sentiment: string) => {
     switch (sentiment) {
-      case 'bullish': return 'var(--green-primary)';
-      case 'bearish': return 'var(--red-primary)';
+      case 'bullish': return 'var(--green-neon)';
+      case 'bearish': return 'var(--red-neon)';
       default: return 'var(--text-secondary)';
     }
   };

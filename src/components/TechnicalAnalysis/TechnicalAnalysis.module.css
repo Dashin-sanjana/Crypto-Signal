@@ -1,12 +1,12 @@
 .widget {
-  padding: 15px;
-  border-radius: 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--glass-border);
-  margin-bottom: 20px;
-  min-height: 400px; /* Minimum height for the widget */
+  padding: 1.5rem;
+  min-height: 400px;
   display: flex;
   flex-direction: column;
+  gap: 1.25rem;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
 }
 
 .header {

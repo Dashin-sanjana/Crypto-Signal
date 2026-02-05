@@ -7,7 +7,6 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import Header from './components/Header/Header';
 import Watchlist from './components/Watchlist/Watchlist';
 import TradingChart from './components/TradingChart/TradingChart';
-import SignalList from './components/SignalList/SignalList';
 import NewsPanel from './components/NewsPanel/NewsPanel';
 import SignalBot from './components/SignalBot';
 import PredictionWidget from './components/PredictionWidget/PredictionWidget';
@@ -31,6 +30,8 @@ function App() {
           <NewsProvider>
             <SignalBot />
             <div className={styles.app}>
+              <div className={`${styles.bgGlow} ${styles.bgGlowTopLeft}`} />
+              <div className={`${styles.bgGlow} ${styles.bgGlowBottomRight}`} />
               <Header />
               
               <div className={styles.mainContainer}>
@@ -43,13 +44,10 @@ function App() {
                 
                 <main className={styles.chartContainer}>
                   <TradingChart />
-                  <div className={styles.signalsListWrapper}>
-                    <SignalList />
-                  </div>
+                  <SignalDisplay />
                 </main>
                 
                 <aside className={styles.rightSidebar}>
-                  <SignalDisplay />
                   <TechnicalAnalysis />
                   <NewsPanel />
                 </aside>

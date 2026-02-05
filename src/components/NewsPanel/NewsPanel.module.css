@@ -1,9 +1,12 @@
 .newsPanel {
-  padding: var(--spacing-lg);
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
-  height: 100%;
+  gap: 1.25rem;
+  min-height: 450px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
   overflow: hidden;
 }
 
@@ -22,17 +25,20 @@
 .refreshBtn {
   width: 32px;
   height: 32px;
-  background: var(--bg-secondary);
+  background: var(--glass-bg-accent);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  font-size: 1rem;
+  font-size: 0.9rem;
   cursor: pointer;
   transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .refreshBtn:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-  transform: rotate(180deg);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent-primary);
 }
 
 .refreshBtn:disabled {
@@ -65,9 +71,10 @@
 }
 
 .filterBtn.active {
-  background: var(--blue-primary);
-  border-color: var(--blue-primary);
-  color: var(--bg-primary);
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+  box-shadow: var(--glow-accent);
 }
 
 .newsList {
@@ -91,8 +98,15 @@
   color: var(--text-secondary);
 }
 
+.widget {
+  padding: var(--spacing-md);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .newsItem {
-  background: var(--bg-secondary);
+  background: var(--glass-bg-accent);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
@@ -102,12 +116,14 @@
   transition: all var(--transition-base);
   text-decoration: none;
   color: inherit;
+  position: relative;
+  overflow: hidden;
 }
 
 .newsItem:hover {
-  background: var(--bg-tertiary);
-  border-color: var(--blue-primary);
-  transform: translateX(-4px);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
 }
 
 .newsHeader {
@@ -144,6 +160,7 @@
   line-height: 1.5;
   color: var(--text-secondary);
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;

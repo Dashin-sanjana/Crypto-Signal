@@ -48,19 +48,19 @@
 .resultsList {
   position: absolute;
   top: 100%;
-  left: 1.25rem;
-  right: 1.25rem;
-  margin-top: 0.75rem;
-  background: rgba(13, 17, 23, 0.9);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  max-height: 400px;
+  left: 0;
+  right: 0;
+  margin-top: 0.5rem;
+  background: var(--bg-tertiary);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  max-height: 300px;
   overflow-y: auto;
-  box-shadow: 
-    0 10px 40px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.05);
-  animation: fadeInDown 0.2s ease-out;
+  box-shadow: var(--shadow-premium);
+  animation: fadeIn 0.2s ease-out;
+  z-index: 1001;
 }
 
 @keyframes fadeInDown {
@@ -130,14 +130,14 @@
 .price {
   font-weight: 700;
   font-size: 0.95rem;
-  color: var(--green-primary);
+  color: var(--green-neon);
 }
 
 .badge {
   font-size: 0.65rem;
   padding: 0.2rem 0.5rem;
-  background: rgba(0, 255, 136, 0.1);
-  color: var(--green-primary);
-  border-radius: 6px;
+  background: var(--green-soft);
+  color: var(--green-neon);
+  border-radius: 4px;
   font-weight: 800;
 }

@@ -12,7 +12,7 @@ const Header = () => {
       <div className={styles.logo}>
         <div className={styles.logoIcon}>₿</div>
         <h1 className={styles.logoText}>
-          Crypto <span className="gradient-text-green">Trader</span>
+          Crypto <span className="gradient-text-blue">Trader</span>
         </h1>
       </div>
 

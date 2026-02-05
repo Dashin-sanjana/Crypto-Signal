@@ -20,6 +20,8 @@ interface Candle {
   volume: number;
 }
 
+export type TradeDirection = 'BUY' | 'SELL';
+
 interface TPSLData {
   symbol: string;
   entry: number;
@@ -27,6 +29,7 @@ interface TPSLData {
   tp2: number;
   sl: number;
   rr: number;
+  direction: TradeDirection;
   timestamp: number;
 }
 
@@ -53,6 +56,8 @@ interface PriceContextType {
   setSetupTimeframe: (tf: string) => void;
   liquidationPrice: number | null;
   setLiquidationPrice: (price: number | null) => void;
+  tradeDirection: TradeDirection;
+  setTradeDirection: (dir: TradeDirection) => void;
 }
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
@@ -82,6 +87,7 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
   const [tpslData, setTpslData] = useState<TPSLData | null>(null);
   const [watchlist, setWatchlist] = useState(WATCHLIST);
   const [activeConnections, setActiveConnections] = useState<Record<string, WebSocket>>({});
+  const [tradeDirection, setTradeDirection] = useState<TradeDirection>('BUY');
 
   // Fetch all available symbols from Binance
   useEffect(() => {
@@ -140,8 +146,8 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
       if (klines.length > 0) {
         const ranges = klines.slice(-14).map(k => k.high - k.low);
         const avgRange = ranges.reduce((a, b) => a + b, 0) / ranges.length;
-        // Ensure some volatility exists to prevent overlapping lines
-        setVolatility(Math.max(avgRange, (klines[klines.length-1].close * 0.001)));
+        // Ensure some volatility exists to prevent overlapping lines (min 1% for safety)
+        setVolatility(Math.max(avgRange, (klines[klines.length-1].close * 0.01)));
       }
     };
     updateVolatility();
@@ -154,22 +160,36 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     if (currentPrice && volatility > 0) {
       let sl, tp1, tp2;
 
-      if (liquidationPrice) {
-        // Safe SL: Positioned at least 20% away from liquidation OR standard ATR
-        const liqDistance = Math.abs(currentPrice - liquidationPrice);
-        const safeBuffer = liqDistance * 0.2; // 20% buffer from liquidation
-        
-        sl = liquidationPrice > currentPrice 
-          ? liquidationPrice - safeBuffer // Short position safety
-          : liquidationPrice + safeBuffer; // Long position safety
+      if (tradeDirection === 'BUY') {
+        if (liquidationPrice && liquidationPrice < currentPrice) {
+          // Safe SL: Positioned at least 20% away from liquidation OR standard ATR
+          const liqDistance = currentPrice - liquidationPrice;
+          const safeBuffer = liqDistance * 0.2; 
+          sl = liquidationPrice + safeBuffer;
           
-        tp1 = currentPrice + (Math.abs(currentPrice - sl) * 1.5);
-        tp2 = currentPrice + (Math.abs(currentPrice - sl) * 3);
+          tp1 = currentPrice + (Math.abs(currentPrice - sl) * 1.5);
+          tp2 = currentPrice + (Math.abs(currentPrice - sl) * 3);
+        } else {
+          // Standard Stable Logic for BUY
+          sl = currentPrice - (volatility * 2.5);
+          tp1 = currentPrice + (volatility * 1.5);
+          tp2 = currentPrice + (volatility * 3.5);
+        }
       } else {
-        // Standard Stable Logic
-        sl = currentPrice - (volatility * 2.0);
-        tp1 = currentPrice + (volatility * 1.5);
-        tp2 = currentPrice + (volatility * 3.5);
+        // SELL Direction Logic
+        if (liquidationPrice && liquidationPrice > currentPrice) {
+          const liqDistance = liquidationPrice - currentPrice;
+          const safeBuffer = liqDistance * 0.2;
+          sl = liquidationPrice - safeBuffer;
+          
+          tp1 = currentPrice - (Math.abs(sl - currentPrice) * 1.5);
+          tp2 = currentPrice - (Math.abs(sl - currentPrice) * 3);
+        } else {
+          // Standard Stable Logic for SELL
+          sl = currentPrice + (volatility * 2.5);
+          tp1 = currentPrice - (volatility * 1.5);
+          tp2 = currentPrice - (volatility * 3.5);
+        }
       }
       
       const risk = Math.abs(currentPrice - sl);
@@ -182,10 +202,11 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
         tp2,
         sl,
         rr,
+        direction: tradeDirection,
         timestamp: Date.now()
       });
     }
-  }, [prices, selectedSymbol, volatility, liquidationPrice]);
+  }, [prices, selectedSymbol, volatility, liquidationPrice, tradeDirection]);
 
   // Connect to Binance WebSocket for real-time prices
   const connectWebSocket = useCallback((symbol: string) => {
@@ -268,7 +289,9 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     setupTimeframe,
     setSetupTimeframe,
     liquidationPrice,
-    setLiquidationPrice
+    setLiquidationPrice,
+    tradeDirection,
+    setTradeDirection
   };
 
   return (
