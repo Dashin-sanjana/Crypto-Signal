@@ -6,20 +6,31 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "node server/index.cjs",
+    "server:dev": "nodemon server/index.cjs",
+    "start": "concurrently \"npm run dev\" \"npm run server\""
   },
   "dependencies": {
     "lightweight-charts": "^4.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-toastify": "^10.0.0",
-    "zustand": "^4.5.0"
+    "zustand": "^4.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^25.2.0",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^5.0.0"
   }

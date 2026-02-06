@@ -4,6 +4,7 @@ import { PriceProvider } from './contexts/PriceContext';
 import { SignalProvider } from './contexts/SignalContext';
 import { NewsProvider } from './contexts/NewsContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { TradingProvider } from './contexts/TradingContext';
 import Header from './components/Header/Header';
 import Watchlist from './components/Watchlist/Watchlist';
 import TradingChart from './components/TradingChart/TradingChart';
@@ -12,6 +13,7 @@ import SignalBot from './components/SignalBot';
 import PredictionWidget from './components/PredictionWidget/PredictionWidget';
 import TechnicalAnalysis from './components/TechnicalAnalysis/TechnicalAnalysis';
 import SignalDisplay from './components/TechnicalAnalysis/SignalDisplay';
+import AutoTradingPanel from './components/AutoTrading/AutoTradingPanel';
 import styles from './App.module.css';
 import { supportsNotifications } from './utils/helpers';
 
@@ -26,48 +28,51 @@ function App() {
   return (
     <NotificationProvider>
       <PriceProvider>
-        <SignalProvider>
-          <NewsProvider>
-            <SignalBot />
-            <div className={styles.app}>
-              <div className={`${styles.bgGlow} ${styles.bgGlowTopLeft}`} />
-              <div className={`${styles.bgGlow} ${styles.bgGlowBottomRight}`} />
-              <Header />
-              
-              <div className={styles.mainContainer}>
-                <aside className={styles.leftSidebar}>
-                  <Watchlist />
-                  <div className={styles.scannerWrapper}>
-                    <PredictionWidget />
-                  </div>
-                </aside>
-                
-                <main className={styles.chartContainer}>
-                  <TradingChart />
-                  <SignalDisplay />
-                </main>
-                
-                <aside className={styles.rightSidebar}>
-                  <TechnicalAnalysis />
-                  <NewsPanel />
-                </aside>
+        <TradingProvider>
+          <SignalProvider>
+            <NewsProvider>
+              <SignalBot />
+              <div className={styles.app}>
+                <div className={`${styles.bgGlow} ${styles.bgGlowTopLeft}`} />
+                <div className={`${styles.bgGlow} ${styles.bgGlowBottomRight}`} />
+                <Header />
+
+                <div className={styles.mainContainer}>
+                  <aside className={styles.leftSidebar}>
+                    <Watchlist />
+                    <div className={styles.scannerWrapper}>
+                      <PredictionWidget />
+                    </div>
+                    <AutoTradingPanel />
+                  </aside>
+
+                  <main className={styles.chartContainer}>
+                    <TradingChart />
+                    <SignalDisplay />
+                  </main>
+
+                  <aside className={styles.rightSidebar}>
+                    <TechnicalAnalysis />
+                    <NewsPanel />
+                  </aside>
+                </div>
+
+                <ToastContainer
+                  position="bottom-right"
+                  autoClose={5000}
+                  hideProgressBar={false}
+                  newestOnTop
+                  closeOnClick
+                  rtl={false}
+                  pauseOnFocusLoss
+                  draggable
+                  pauseOnHover
+                  theme="dark"
+                />
               </div>
-              
-              <ToastContainer
-                position="bottom-right"
-                autoClose={5000}
-                hideProgressBar={false}
-                newestOnTop
-                closeOnClick
-                rtl={false}
-                pauseOnFocusLoss
-                draggable
-                pauseOnHover
-                theme="dark"
-              />
-            </div>
-          </NewsProvider>
-        </SignalProvider>
+            </NewsProvider>
+          </SignalProvider>
+        </TradingProvider>
       </PriceProvider>
     </NotificationProvider>
   );
