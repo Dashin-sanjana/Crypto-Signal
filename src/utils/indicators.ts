@@ -88,14 +88,13 @@ export const calculateMACD = (data: Candle[]) => {
   
   // Calculate MACD line
   for (let i = 0; i < data.length; i++) {
-    if (emaFast[i] !== undefined && emaSlow[i] !== undefined) {
-      macdLine[i] = emaFast[i] - emaSlow[i];
-    }
+    const fastVal = emaFast[i];
+    const slowVal = emaSlow[i];
+    macdLine[i] = (fastVal !== undefined && slowVal !== undefined) ? fastVal - slowVal : 0;
   }
   
   // Calculate signal line (EMA of MACD line)
-  // We mock a candle structure with just close price for EMA calculation
-  const macdData = macdLine.map((value) => ({ close: value || 0 } as Candle));
+  const macdData = macdLine.map((value) => ({ close: value } as Candle));
   const signalEMA = calculateEMA(macdData, signal);
   
   // Calculate histogram
@@ -277,4 +276,118 @@ export const detectDivergence = (priceData: number[], indicatorData: number[], l
   }
   
   return null;
+};
+
+/**
+ * Calculate Heikin Ashi Candles
+ */
+export const calculateHeikinAshi = (data: Candle[]): Candle[] => {
+  if (data.length === 0) return [];
+  
+  const haData: Candle[] = [];
+  
+  // First candle
+  haData[0] = {
+    ...data[0],
+    close: (data[0].open + data[0].high + data[0].low + data[0].close) / 4
+  };
+  
+  for (let i = 1; i < data.length; i++) {
+    const prev = haData[i - 1];
+    const curr = data[i];
+    
+    const haClose = (curr.open + curr.high + curr.low + curr.close) / 4;
+    const haOpen = (prev.open + prev.close) / 2;
+    const haHigh = Math.max(curr.high, haOpen, haClose);
+    const haLow = Math.min(curr.low, haOpen, haClose);
+    
+    haData[i] = {
+      ...curr,
+      open: haOpen,
+      high: haHigh,
+      low: haLow,
+      close: haClose
+    };
+  }
+  
+  return haData;
+};
+
+/**
+ * Detect Candlestick Patterns
+ */
+export const detectCandlePatterns = (data: Candle[]) => {
+  if (data.length < 3) return { bullish: [], bearish: [] };
+  
+  const bullish: string[] = [];
+  const bearish: string[] = [];
+  
+  const last = data[data.length - 1];
+  const prev = data[data.length - 2];
+  
+  const lastBody = Math.abs(last.close - last.open);
+  
+  // Bullish Engulfing
+  if (prev.close < prev.open && last.close > last.open && last.close > prev.open && last.open < prev.close) {
+    bullish.push('Engulfing');
+  }
+  
+  // Bearish Engulfing
+  if (prev.close > prev.open && last.close < last.open && last.close < prev.open && last.open > prev.close) {
+    bearish.push('Engulfing');
+  }
+  
+  // Hammer
+  const lastLowerWick = Math.min(last.open, last.close) - last.low;
+  const lastUpperWick = last.high - Math.max(last.open, last.close);
+  if (lastLowerWick > lastBody * 2 && lastUpperWick < lastBody) {
+    bullish.push('Hammer');
+  }
+  
+  // Shooting Star
+  if (lastUpperWick > lastBody * 2 && lastLowerWick < lastBody) {
+    bearish.push('Shooting Star');
+  }
+  
+  // Doji
+  if (lastBody < (last.high - last.low) * 0.1) {
+    bullish.push('Doji'); // Could be reversal either way, but often used as consolidation/reversal
+  }
+
+  return { bullish, bearish };
+};
+
+/**
+ * Detect Chart Patterns (Basic)
+ */
+export const detectChartPatterns = (data: Candle[]) => {
+  if (data.length < 20) return { bullish: [], bearish: [] };
+  
+  const bullish: string[] = [];
+  const bearish: string[] = [];
+  
+  const recent = data.slice(-20);
+  const peaks: number[] = [];
+  const troughs: number[] = [];
+  
+  for (let i = 1; i < recent.length - 1; i++) {
+    if (recent[i].high > recent[i-1].high && recent[i].high > recent[i+1].high) peaks.push(recent[i].high);
+    if (recent[i].low < recent[i-1].low && recent[i].low < recent[i+1].low) troughs.push(recent[i].low);
+  }
+  
+  // Double Bottom
+  if (troughs.length >= 2) {
+    const t1 = troughs[troughs.length - 1];
+    const t2 = troughs[troughs.length - 2];
+    if (Math.abs(t1 - t2) < t1 * 0.002) bullish.push('Double Bottom');
+  }
+  
+  // Double Top
+  if (peaks.length >= 2) {
+    const p1 = peaks[peaks.length - 1];
+    const p2 = peaks[peaks.length - 2];
+    if (Math.abs(p1 - p2) < p1 * 0.002) bearish.push('Double Top');
+  }
+  
+  return { bullish, bearish };
 };

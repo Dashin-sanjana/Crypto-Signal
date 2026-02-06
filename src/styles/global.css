@@ -15,8 +15,10 @@
   --accent-secondary: #8b5cf6; /* Modern Purple */
   --green-neon: #00ffa3;
   --green-soft: rgba(0, 255, 163, 0.1);
+  --green-primary: #00ffa3;
   --red-neon: #ff4d4d;
   --red-soft: rgba(255, 77, 77, 0.1);
+  --red-primary: #ff4d4d;
   --yellow-neon: #facc15;
   
   /* Text Colors */

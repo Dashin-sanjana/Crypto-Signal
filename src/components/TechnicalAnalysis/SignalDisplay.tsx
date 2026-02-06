@@ -8,7 +8,9 @@ const SignalDisplay: React.FC = () => {
     tpslData,
     selectedSymbol, 
     tradeDirection,
-    setTradeDirection
+    setTradeDirection,
+    recommendation,
+    indicatorStatus
   } = usePriceContext();
 
   if (!tpslData || tpslData.symbol !== selectedSymbol) {
@@ -40,6 +42,30 @@ const SignalDisplay: React.FC = () => {
           }}>
             {tradeDirection} SIGNAL
           </div>
+          <div className={styles.fibBadge}>EW VALIDATION: {recommendation.ewScore}/5</div>
+        </div>
+      </div>
+
+      <div className={styles.aiRecommendation}>
+        <div className={styles.recHeader}>
+          <span className={styles.aiLabel}>AI PREDICTION</span>
+          <span className={`${styles.recAction} ${styles[recommendation.action.replace(' ', '')]}`}>
+            {recommendation.action}
+          </span>
+          <div className={styles.confidenceBar}>
+            <div className={styles.confidenceFill} style={{ width: `${recommendation.confidence}%` }}></div>
+            <span className={styles.confidenceValue}>{recommendation.confidence}% CONFIRMATION</span>
+          </div>
+        </div>
+        <div className={styles.indicatorGrid}>
+          {Object.entries(indicatorStatus).map(([name, status]) => (
+            <div key={name} className={`${styles.indicatorTag} ${styles[status]}`}>
+              {name}: {status.toUpperCase()}
+            </div>
+          ))}
+        </div>
+        <div className={styles.disclaimer}>
+          *Custom AI Logic (EW + Indicators). May differ from external TradingView signals.
         </div>
       </div>
 
@@ -72,7 +98,7 @@ const SignalDisplay: React.FC = () => {
         </div>
         
         <div className={`${styles.levelRow} ${styles.tp1}`}>
-          <span className={styles.label}>Target 1</span>
+          <span className={styles.label}>Fib 1.618 Target</span>
           <span className={styles.value} style={{ color: isBuy ? '#10b981' : '#ff4444' }}>
             ${formatPrice(tp1 || 0)}
           </span>
@@ -82,7 +108,7 @@ const SignalDisplay: React.FC = () => {
         </div>
 
         <div className={`${styles.levelRow} ${styles.tp2}`}>
-          <span className={styles.label}>Target 2</span>
+          <span className={styles.label}>Fib 2.618 Target</span>
           <span className={styles.value} style={{ color: isBuy ? '#00ff88' : '#ff6b6b' }}>
             ${formatPrice(tp2 || 0)}
           </span>
@@ -92,12 +118,12 @@ const SignalDisplay: React.FC = () => {
         </div>
 
         <div className={`${styles.levelRow} ${styles.sl}`}>
-          <span className={styles.label}>Stop Loss</span>
-          <span className={styles.value} style={{ color: isBuy ? '#ff4444' : '#10b981' }}>
+          <span className={styles.label}>Fib 0.786 Target</span>
+          <span className={styles.value} style={{ color: isBuy ? '#10b981' : '#00ff88' }}>
             ${formatPrice(sl || 0)}
           </span>
-          <span className={styles.percentage} style={{ color: isBuy ? '#ff4444' : '#10b981' }}>
-            {isBuy ? '-' : '+'}{slPercent.toFixed(2)}%
+          <span className={styles.percentage} style={{ color: isBuy ? '#10b981' : '#00ff88' }}>
+            {isBuy ? '+' : '-'}{slPercent.toFixed(2)}%
           </span>
         </div>
       </div>
@@ -116,17 +142,27 @@ const SignalDisplay: React.FC = () => {
             // Visual feedback for live entry
             const btn = document.activeElement as HTMLElement;
             if (btn) {
-              const originalText = btn.innerText;
-              btn.innerText = '✅ ENTRY SENT';
+              const originalText = btn.innerHTML;
+              btn.innerHTML = '✅ ENTRY SENT';
               btn.style.filter = 'brightness(1.5)';
               setTimeout(() => {
-                btn.innerText = originalText;
+                btn.innerHTML = originalText;
                 btn.style.filter = '';
               }, 1500);
             }
           }}
         >
-          {isBuy ? '🚀 BUY NOW' : '📉 SELL NOW'}
+          {isBuy ? (
+            <div className={styles.btnContent}>
+              <span>🚀 BUY NOW</span>
+              <span className={styles.btnSubtext}>TP: ${formatPrice(sl)} | TP: ${formatPrice(tp2)}</span>
+            </div>
+          ) : (
+            <div className={styles.btnContent}>
+              <span>📉 SELL NOW</span>
+              <span className={styles.btnSubtext}>TP: ${formatPrice(sl)} | TP: ${formatPrice(tp2)}</span>
+            </div>
+          )}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { WATCHLIST, BINANCE_WS_BASE, BINANCE_API_BASE } from '../utils/constants';
+import { calculateTechnicalSignal } from '../utils/analysis';
 
 interface PriceData {
   symbol: string;
@@ -58,6 +59,13 @@ interface PriceContextType {
   setLiquidationPrice: (price: number | null) => void;
   tradeDirection: TradeDirection;
   setTradeDirection: (dir: TradeDirection) => void;
+  recommendation: {
+    action: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+    confidence: number;
+    reasons: string[];
+    ewScore: number;
+  };
+  indicatorStatus: Record<string, 'bullish' | 'bearish' | 'neutral'>;
 }
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
@@ -82,12 +90,18 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [allSymbols, setAllSymbols] = useState<SymbolInfo[]>([]);
   const [setupTimeframe, setSetupTimeframe] = useState<string>('5m'); // Strictly 5m for predictions
-  const [volatility, setVolatility] = useState<number>(0.01); // Default non-zero
   const [liquidationPrice, setLiquidationPrice] = useState<number | null>(null);
   const [tpslData, setTpslData] = useState<TPSLData | null>(null);
   const [watchlist, setWatchlist] = useState(WATCHLIST);
   const [activeConnections, setActiveConnections] = useState<Record<string, WebSocket>>({});
   const [tradeDirection, setTradeDirection] = useState<TradeDirection>('BUY');
+  const [recommendation, setRecommendation] = useState<{
+    action: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+    confidence: number;
+    reasons: string[];
+    ewScore: number;
+  }>({ action: 'NEUTRAL', confidence: 0, reasons: [], ewScore: 0 });
+  const [indicatorStatus, setIndicatorStatus] = useState<Record<string, 'bullish' | 'bearish' | 'neutral'>>({});
 
   // Fetch all available symbols from Binance
   useEffect(() => {
@@ -139,61 +153,69 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     }
   }, []);
 
-  // Calculate volatility (ATR-like) once when symbol or setup timeframe changes
+  // Fetch history when symbol changes
   useEffect(() => {
-    const updateVolatility = async () => {
-      const klines = await fetchKlineData(selectedSymbol, setupTimeframe, 50);
-      if (klines.length > 0) {
-        const ranges = klines.slice(-14).map(k => k.high - k.low);
-        const avgRange = ranges.reduce((a, b) => a + b, 0) / ranges.length;
-        // Ensure some volatility exists to prevent overlapping lines (min 1% for safety)
-        setVolatility(Math.max(avgRange, (klines[klines.length-1].close * 0.01)));
-      }
-    };
-    updateVolatility();
-    setLiquidationPrice(null); // Reset liquidation on symbol change
+    fetchKlineData(selectedSymbol, setupTimeframe, 50); // Consistent 50 candles
+    setLiquidationPrice(null);
   }, [selectedSymbol, setupTimeframe, fetchKlineData]);
+
+  // Helper to find swing points for Fibonacci
+  const getSwingPoints = useCallback((klines: Candle[]) => {
+    if (klines.length < 20) return null;
+    const recent = klines.slice(-30); // Look at last 30 candles for recent move
+    const highs = recent.map(k => k.high);
+    const lows = recent.map(k => k.low);
+    return {
+      high: Math.max(...highs),
+      low: Math.min(...lows)
+    };
+  }, []);
 
   // Update TP/SL on every price tick
   useEffect(() => {
     const currentPrice = prices[selectedSymbol]?.price;
-    if (currentPrice && volatility > 0) {
+    const history = priceHistory[`${selectedSymbol}_${setupTimeframe}`];
+    
+    if (currentPrice && history && history.length >= 20) {
+      const swings = getSwingPoints(history);
+      if (!swings) return;
+      
+      const { high, low } = swings;
+      const range = Math.max(0.0001, high - low);
+      
       let sl, tp1, tp2;
 
       if (tradeDirection === 'BUY') {
-        if (liquidationPrice && liquidationPrice < currentPrice) {
-          // Safe SL: Positioned at least 20% away from liquidation OR standard ATR
-          const liqDistance = currentPrice - liquidationPrice;
-          const safeBuffer = liqDistance * 0.2; 
-          sl = liquidationPrice + safeBuffer;
-          
-          tp1 = currentPrice + (Math.abs(currentPrice - sl) * 1.5);
-          tp2 = currentPrice + (Math.abs(currentPrice - sl) * 3);
-        } else {
-          // Standard Stable Logic for BUY
-          sl = currentPrice - (volatility * 2.5);
-          tp1 = currentPrice + (volatility * 1.5);
-          tp2 = currentPrice + (volatility * 3.5);
-        }
+        // Stop Loss below recent low (Wave 2/4 base)
+        sl = low - (range * 0.236); 
+        tp1 = high + (range * 0.618);
+        tp2 = high + (range * 1.618);
+        
+        // Logical check: SL must be below current price
+        sl = Math.min(sl, currentPrice * 0.985); 
       } else {
-        // SELL Direction Logic
-        if (liquidationPrice && liquidationPrice > currentPrice) {
-          const liqDistance = liquidationPrice - currentPrice;
-          const safeBuffer = liqDistance * 0.2;
-          sl = liquidationPrice - safeBuffer;
-          
-          tp1 = currentPrice - (Math.abs(sl - currentPrice) * 1.5);
-          tp2 = currentPrice - (Math.abs(sl - currentPrice) * 3);
-        } else {
-          // Standard Stable Logic for SELL
-          sl = currentPrice + (volatility * 2.5);
-          tp1 = currentPrice - (volatility * 1.5);
-          tp2 = currentPrice - (volatility * 3.5);
-        }
+        // Stop Loss above recent high
+        sl = high + (range * 0.236); 
+        tp1 = low - (range * 0.618);
+        tp2 = low - (range * 1.618);
+        
+        // Logical check: SL must be above current price
+        sl = Math.max(sl, currentPrice * 1.015);
       }
       
       const risk = Math.abs(currentPrice - sl);
       const rr = risk > 0 ? (Math.abs(tp2 - currentPrice)) / risk : 0;
+      
+      const signal = calculateTechnicalSignal(history, currentPrice);
+      if (signal) {
+        setRecommendation({
+          action: signal.action,
+          confidence: signal.confidence,
+          reasons: signal.reasons,
+          ewScore: signal.ewScore
+        });
+        setIndicatorStatus(signal.status);
+      }
 
       setTpslData({
         symbol: selectedSymbol,
@@ -206,7 +228,7 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
         timestamp: Date.now()
       });
     }
-  }, [prices, selectedSymbol, volatility, liquidationPrice, tradeDirection]);
+  }, [prices, selectedSymbol, priceHistory, setupTimeframe, tradeDirection, getSwingPoints]);
 
   // Connect to Binance WebSocket for real-time prices
   const connectWebSocket = useCallback((symbol: string) => {
@@ -291,7 +313,9 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     liquidationPrice,
     setLiquidationPrice,
     tradeDirection,
-    setTradeDirection
+    setTradeDirection,
+    recommendation,
+    indicatorStatus
   };
 
   return (

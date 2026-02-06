@@ -5,7 +5,7 @@ import { WATCHLIST } from '../../utils/constants';
 import styles from './PredictionWidget.module.css';
 
 const PredictionWidget: React.FC = () => {
-  const { fetchKlineData } = usePriceContext();
+  const { fetchKlineData, prices } = usePriceContext();
   const [predictions, setPredictions] = useState<Record<string, any>>({});
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const [activeTimeframe, setActiveTimeframe] = useState<'1m' | '5m'>('5m');
@@ -21,7 +21,11 @@ const PredictionWidget: React.FC = () => {
         try {
           const candles = await fetchKlineData(coin.symbol, activeTimeframe, 50);
           if (candles.length >= 20) {
-            results[coin.symbol] = predictShortTerm(candles);
+            const currentPrice = prices[coin.symbol]?.price;
+            results[coin.symbol] = predictShortTerm(candles, currentPrice);
+            if (coin.symbol === 'BTCUSDT' || coin.symbol === 'ETHUSDT') {
+              console.log(`[Scanner] ${coin.symbol} Prediction:`, results[coin.symbol].direction, 'at', currentPrice);
+            }
           }
         } catch (e) {
           console.error(`Failed to predict for ${coin.symbol}`, e);
