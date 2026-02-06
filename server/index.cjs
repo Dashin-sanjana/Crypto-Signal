@@ -133,9 +133,64 @@ app.get('/api/trades', (req, res) => {
     res.json(riskManager.getTradeHistory());
 });
 
-// Get open trades (positions without PnL yet)
-app.get('/api/open-trades', (req, res) => {
-    res.json(riskManager.getOpenTrades());
+// Get open trades - syncs tracked trades with actual Binance balances
+app.get('/api/open-trades', async (req, res) => {
+    try {
+        // Get locally tracked trades
+        const localTrades = riskManager.getOpenTrades();
+
+        // Get actual positions from Binance (account balances)
+        const positions = await binance.getOpenPositions();
+
+        // List of major crypto assets we care about
+        const majorAssets = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'LINK', 'AVAX', 'MATIC', 'LTC', 'TRX', 'SHIB', 'APT', 'SUI', 'OP', 'ARB', 'INJ', 'FIL', 'ATOM', 'UNI', 'NEAR', 'PEPE', 'WIF'];
+
+        // Create a map of Binance balances by symbol
+        const balanceMap = new Map();
+        positions.forEach(pos => {
+            const asset = pos.asset;
+            const total = parseFloat(pos.free) + parseFloat(pos.locked);
+            if (total > 0.001 && majorAssets.includes(asset)) {
+                balanceMap.set(`${asset}USDT`, total);
+            }
+        });
+
+        // Sync local trades with actual balances
+        const syncedTrades = localTrades.map(trade => {
+            const actualBalance = balanceMap.get(trade.symbol);
+            if (actualBalance !== undefined) {
+                // Update quantity to match actual balance
+                balanceMap.delete(trade.symbol); // Remove from map so we don't show it twice
+                return {
+                    ...trade,
+                    quantity: actualBalance,
+                    synced: true
+                };
+            }
+            return trade;
+        }).filter(trade => {
+            // Remove trades where balance is now 0 (position was closed on Binance)
+            const actualBalance = balanceMap.get(trade.symbol);
+            return actualBalance === undefined || actualBalance > 0 || trade.synced;
+        });
+
+        // Add any remaining balances that aren't being tracked
+        const untrackedPositions = Array.from(balanceMap.entries()).map(([symbol, quantity]) => ({
+            symbol,
+            side: 'BUY',
+            quantity,
+            price: 0, // Unknown entry price
+            orderId: `balance-${symbol.replace('USDT', '')}`,
+            timestamp: Date.now(),
+            isBalance: true
+        }));
+
+        res.json([...syncedTrades, ...untrackedPositions]);
+    } catch (error) {
+        console.error('Error fetching open trades:', error.message);
+        // Fallback to just local trades if Binance API fails
+        res.json(riskManager.getOpenTrades());
+    }
 });
 
 

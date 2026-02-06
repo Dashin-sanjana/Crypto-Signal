@@ -131,6 +131,11 @@ app.get('/api/trades', (req, res) => {
     res.json(riskManager.getTradeHistory());
 });
 
+// Get open trades (tracked by risk manager)
+app.get('/api/open-trades', (req, res) => {
+    res.json(riskManager.getOpenTrades());
+});
+
 app.listen(PORT, () => {
     console.log(`Trading server running on port ${PORT}`);
     console.log(`Mode: ${binance.isTestnet() ? 'TESTNET' : 'PRODUCTION'}`);
