@@ -38,7 +38,7 @@ const TechnicalAnalysis: React.FC = () => {
   return (
     <div className={`${styles.widget} glass-panel`}>
       <div className={styles.header}>
-        <span className={styles.title}>Professional Analysis</span>
+        <span className={styles.title}>External Consensus (TradingView)</span>
       </div>
       <div className={styles.container} ref={containerRef}></div>
     </div>

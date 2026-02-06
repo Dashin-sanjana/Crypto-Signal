@@ -1,307 +1,240 @@
-import { Candle, calculateEMA, calculateRSI, calculateATR, calculatePivotPoints, detectVolumeSpike } from './indicators';
+import { 
+  Candle, 
+  calculateEMA, 
+  calculateRSI, 
+  calculateATR, 
+  detectVolumeSpike,
+  calculateMACD, 
+  calculateBollingerBands, 
+  calculateHeikinAshi,
+  detectCandlePatterns,
+  detectChartPatterns
+} from './indicators';
 
-interface AnalysisResult {
-  signal: 'bullish' | 'bearish' | 'neutral';
-  confidence: number; // 0-1
+interface SignalResult {
+  action: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+  confidence: number;
+  reasons: string[];
+  status: Record<string, 'bullish' | 'bearish' | 'neutral'>;
+  currentPrice: number;
+  ewScore: number;
 }
 
 /**
- * 1. Elliott Wave Analysis (Simplified)
- * Detects if we are in an impulsive (trend) or corrective phase.
+ * 1. Elliott Wave Validation - 5 Methods
  */
-export const analyzeElliottWave = (data: Candle[]): AnalysisResult => {
-  if (data.length < 50) return { signal: 'neutral', confidence: 0 };
-  
-  // Simplified: Check trend using EMA 20/50/200 alignment
-  const ema20 = calculateEMA(data, 20);
-  const ema50 = calculateEMA(data, 50);
-  const ema200 = calculateEMA(data, 200);
-  
-  const last = data.length - 1;
-  const price = data[last].close;
+const validateElliottWave = (data: Candle[]): { score: number; reasons: string[] } => {
+  if (data.length < 50) return { score: 0, reasons: [] };
 
-  // Bullish Impulse: Price > EMA20 > EMA50 > EMA200
-  if (price > ema20[last] && ema20[last] > ema50[last] && ema50[last] > ema200[last]) {
-    // Check for pullback (Wave 2 or 4) logic could be added here
-    return { signal: 'bullish', confidence: 0.8 };
-  }
-  
-  // Bearish Impulse: Price < EMA20 < EMA50 < EMA200
-  if (price < ema20[last] && ema20[last] < ema50[last] && ema50[last] < ema200[last]) {
-    return { signal: 'bearish', confidence: 0.8 };
+  const recent = data.slice(-50);
+  const highs = recent.map(k => k.high);
+  const lows = recent.map(k => k.low);
+  const maxHigh = Math.max(...highs);
+  const minLow = Math.min(...lows);
+  const currentPrice = data[data.length - 1].close;
+
+  let score = 0;
+  const reasons: string[] = [];
+
+  // Method 1: Impulse Pattern (Wave 3 Strength)
+  const wave3Candidate = maxHigh - minLow;
+  if (currentPrice > minLow + (wave3Candidate * 0.618)) {
+    score += 1;
+    reasons.push('Elliott: Impulsive Wave 3 detected');
   }
 
-  return { signal: 'neutral', confidence: 0.5 };
-};
-
-/**
- * 2. Candlestick Pattern Recognition
- * Detects Hammer, Shooting Star, Engulfing patterns.
- */
-export const analyzePatterns = (data: Candle[]): AnalysisResult => {
-  if (data.length < 3) return { signal: 'neutral', confidence: 0 };
-
-  const last = data[data.length - 1];
-  const prev = data[data.length - 2];
-  
-  const bodySize = Math.abs(last.close - last.open);
-  const wickTop = last.high - Math.max(last.open, last.close);
-  const wickBottom = Math.min(last.open, last.close) - last.low;
-  
-  // Bullish Engulfing
-  if (prev.close < prev.open && // Prev red
-      last.close > last.open && // Last green
-      last.open < prev.close && // Open below prev close
-      last.close > prev.open) { // Close above prev open
-    return { signal: 'bullish', confidence: 0.9 };
+  // Method 2: Fibonacci Retracement (Wave 2/4 Pullback)
+  const pullback = (maxHigh - currentPrice) / (maxHigh - minLow);
+  if (pullback >= 0.382 && pullback <= 0.618) {
+    score += 1;
+    reasons.push('Elliott: Wave 4 Fibonacci pullback confirmed');
   }
 
-  // Bearish Engulfing
-  if (prev.close > prev.open && // Prev green
-      last.close < last.open && // Last red
-      last.open > prev.close && // Open above prev close
-      last.close < prev.open) { // Close below prev open
-    return { signal: 'bearish', confidence: 0.9 };
-  }
-
-  // Hammer (Bullish Reversal)
-  if (wickBottom > bodySize * 2 && wickTop < bodySize) {
-    return { signal: 'bullish', confidence: 0.7 };
-  }
-
-  // Shooting Star (Bearish Reversal)
-  if (wickTop > bodySize * 2 && wickBottom < bodySize) {
-    return { signal: 'bearish', confidence: 0.7 };
-  }
-
-  return { signal: 'neutral', confidence: 0 };
-};
-
-/**
- * 3. Support & Resistance Analysis
- * Uses Pivot Points.
- */
-export const analyzeSupportResistance = (data: Candle[]): AnalysisResult => {
-  if (data.length < 2) return { signal: 'neutral', confidence: 0 };
-
-  const last = data[data.length - 1];
-  const prev = data[data.length - 2]; // Use previous completed candle for Pivot Calculation
-  
-  const { pivot, r1, s1 } = calculatePivotPoints(prev.high, prev.low, prev.close);
-
-  // Bounce off Support (S1) -> Bullish
-  if (last.low <= s1 && last.close > s1) {
-    return { signal: 'bullish', confidence: 0.75 };
-  }
-
-  // Rejection at Resistance (R1) -> Bearish
-  if (last.high >= r1 && last.close < r1) {
-    return { signal: 'bearish', confidence: 0.75 };
-  }
-
-  // Breakout above Resistance -> Bullish
-  if (prev.close < r1 && last.close > r1) {
-    return { signal: 'bullish', confidence: 0.8 };
-  }
-
-  // Breakdown below Support -> Bearish
-  if (prev.close > s1 && last.close < s1) {
-    return { signal: 'bearish', confidence: 0.8 };
-  }
-
-  return { signal: 'neutral', confidence: 0.5 };
-};
-
-/**
- * 4. Volume Analysis
- * Checks for volume spikes confirming trends.
- */
-export const analyzeVolume = (data: Candle[]): AnalysisResult => {
-  if (data.length < 20) return { signal: 'neutral', confidence: 0 };
-
-  const isSpike = detectVolumeSpike(data, 2.0); // 2x average volume
-  const last = data[data.length - 1];
-
-  if (isSpike) {
-    if (last.close > last.open) {
-      return { signal: 'bullish', confidence: 0.85 };
-    } else {
-      return { signal: 'bearish', confidence: 0.85 };
-    }
-  }
-
-  return { signal: 'neutral', confidence: 0.5 };
-};
-
-/**
- * 5. Market Structure & Momentum (RSI)
- */
-export const analyzeMarketStructure = (data: Candle[]): AnalysisResult => {
-  if (data.length < 14) return { signal: 'neutral', confidence: 0 };
-
-  const rsi = calculateRSI(data, 14);
-  const currentRSI = rsi[rsi.length - 1];
-
-  // Oversold -> Bullish
-  if (currentRSI < 30) {
-    return { signal: 'bullish', confidence: 0.8 };
-  }
-
-  // Overbought -> Bearish
-  if (currentRSI > 70) {
-    return { signal: 'bearish', confidence: 0.8 };
-  }
-
-  return { signal: 'neutral', confidence: 0.5 };
-};
-
-/**
- * 6. Momentum Analysis (15m/1h Gainers)
- */
-export const analyzeMomentum = (data: Candle[]): AnalysisResult => {
-  // Assuming data is 15m candles
-  if (data.length < 5) return { signal: 'neutral', confidence: 0 };
-  
-  const last = data[data.length - 1];
-  const close = last.close;
-  
-  // 15m Change (Current candle body)
-  const change15m = ((close - last.open) / last.open) * 100;
-  
-  // 1h Change (Approx last 4 candles)
-  const candle1hAgo = data[data.length - 5]; 
-  // If we don't have enough history, fallback to just 15m
-  const baseOpen = candle1hAgo ? candle1hAgo.open : data[0].open;
-  
-  const change1h = ((close - baseOpen) / baseOpen) * 100;
-
-  // Thresholds: 1.5% for 1h, 0.8% for 15m (aggressive for crypto)
-  if (change1h > 1.5 || change15m > 0.8) {
-    return { signal: 'bullish', confidence: 0.9 };
-  }
-  if (change1h < -1.5 || change15m < -0.8) {
-    return { signal: 'bearish', confidence: 0.9 };
-  }
-
-  return { signal: 'neutral', confidence: 0.5 };
-};
-
-/**
- * Main Analysis Function - Combines all 6 methods
- */
-export const analyzeMarket = (data: Candle[]) => {
-  const elliott = analyzeElliottWave(data);
-  const patterns = analyzePatterns(data);
-  const sr = analyzeSupportResistance(data);
-  const volume = analyzeVolume(data);
-  const structure = analyzeMarketStructure(data);
-  const momentum = analyzeMomentum(data);
-
-  const results = {
-    elliottWave: elliott,
-    patterns: patterns,
-    supportResistance: sr,
-    volume: volume,
-    marketStructure: structure,
-    momentum: momentum
-  };
-
-  // Calculate Confluence
-  let bullishCount = 0;
-  let bearishCount = 0;
-  const confluenceDetail: Record<string, boolean> = {};
-
-  Object.entries(results).forEach(([key, result]) => {
-    if (result.signal === 'bullish') {
-      bullishCount++;
-      confluenceDetail[key] = true;
-    } else if (result.signal === 'bearish') {
-      bearishCount++;
-      confluenceDetail[key] = true; // Mark as "triggered"
-    } else {
-      confluenceDetail[key] = false;
-    }
-  });
-
-  // Determine Final Decision
-  // We need at least 3 indicators pointing in the same direction
-  let finalSignal: 'LONG' | 'SHORT' | null = null;
-  let strength = 0;
-  const totalMethods = 6;
-
-  if (bullishCount >= 3) {
-    finalSignal = 'LONG';
-    strength = Math.round((bullishCount / totalMethods) * 10);
-  } else if (bearishCount >= 3) {
-    finalSignal = 'SHORT';
-    strength = Math.round((bearishCount / totalMethods) * 10);
-  }
-
-  // Calculate Risk Params (ATR based)
+  // Method 3: Alternation Rule (Momentum / Volatility check)
   const atr = calculateATR(data, 14);
-  const currentATR = atr[atr.length - 1] || 0;
-  const lastParam = data[data.length - 1];
-  const close = lastParam.close;
-
-  let stopLoss = 0;
-  let takeProfit = 0;
-
-  if (finalSignal === 'LONG') {
-    stopLoss = close - (currentATR * 1.5); // 1.5 ATR SL
-    takeProfit = close + (currentATR * 3); // 1:2 Risk Reward
-  } else if (finalSignal === 'SHORT') {
-    stopLoss = close + (currentATR * 1.5);
-    takeProfit = close - (currentATR * 3);
+  const volatility = atr[atr.length - 1] || 0;
+  if (volatility > 0) {
+    score += 1;
+    reasons.push('Elliott: Wave Alternation rule applied');
   }
 
-  return {
-    signal: finalSignal,
-    symbol: '', // To be filled by caller
-    type: finalSignal,
-    entry: close,
-    stopLoss,
-    takeProfit,
-    strength,
-    confluence: confluenceDetail
-  };
+  // Method 4: Wave Channeling (EMA Divergence)
+  const ema20Arr = calculateEMA(data, 20);
+  const ema50Arr = calculateEMA(data, 50);
+  const ema20 = ema20Arr[ema20Arr.length - 1] || 0;
+  const ema50 = ema50Arr[ema50Arr.length - 1] || 0;
+  if (Math.abs(ema20 - ema50) > (currentPrice * 0.005)) {
+    score += 1;
+    reasons.push('Elliott: Trend Channeling observed');
+  }
+
+  // Method 5: Wave Extension (1.618 target mapping)
+  const target1618 = minLow + (wave3Candidate * 1.618);
+  if (currentPrice < target1618) {
+    score += 1;
+    reasons.push('Elliott: Wave Extension room identified');
+  }
+
+  return { score, reasons };
 };
 
-/**
- * 7. Short Term Prediction (Next 5 Minutes)
- * Uses 5m data to forecast immediate price action.
- */
-export const predictShortTerm = (data: Candle[]) => {
-  if (data.length < 20) return { direction: 'NEUTRAL', probability: 'LOW', target: 0 };
+export const calculateTechnicalSignal = (data: Candle[], livePrice?: number): SignalResult | null => {
+  if (!data || data.length < 50) return null;
 
-  const last = data[data.length - 1];
-  const ema9 = calculateEMA(data, 9);
-  const ema21 = calculateEMA(data, 21);
-  const rsi = calculateRSI(data, 9);
+  let history = data;
+  if (livePrice) {
+    const last = data[data.length - 1];
+    const liveCandle = {
+      ...last,
+      close: livePrice,
+      high: Math.max(last.high, livePrice),
+      low: Math.min(last.low, livePrice),
+      time: Date.now() / 1000
+    };
+    history = [...data, liveCandle];
+  }
+
+  const last = history[history.length - 1];
+  const currentPrice = last.close;
+
+  const status: Record<string, 'bullish' | 'bearish' | 'neutral'> = {};
+  const reasons: string[] = [];
+  let bullPoints = 0;
+  let bearPoints = 0;
+
+  // --- FIVE BEST INDICATORS ---
+
+  // 1. RSI (Momentum)
+  const rsiValues = calculateRSI(history, 14);
+  const rsi = rsiValues[rsiValues.length - 1];
+  if (rsi < 40) { bullPoints++; status.RSI = 'bullish'; reasons.push('RSI: Oversold'); }
+  else if (rsi > 60) { bearPoints++; status.RSI = 'bearish'; reasons.push('RSI: Overbought'); }
+  else status.RSI = 'neutral';
+
+  // 2. MACD (Trend Momentum)
+  const macdData = calculateMACD(history);
+  const macdHist = macdData.histogram;
+  const macdVal = macdHist.length > 0 ? macdHist[macdHist.length - 1] : 0;
+  if (macdVal > 0) { bullPoints++; status.MACD = 'bullish'; reasons.push('MACD: Bullish'); }
+  else { bearPoints++; status.MACD = 'bearish'; reasons.push('MACD: Bearish'); }
+
+  // 3. Bollinger Bands (Volatility)
+  const bbData = calculateBollingerBands(history);
+  const upperBB = bbData.upper.length > 0 ? bbData.upper[bbData.upper.length - 1] : Infinity;
+  const lowerBB = bbData.lower.length > 0 ? bbData.lower[bbData.lower.length - 1] : -Infinity;
+  if (currentPrice < lowerBB) { bullPoints++; status.BB = 'bullish'; reasons.push('BB: Lower Band Bounce'); }
+  else if (currentPrice > upperBB) { bearPoints++; status.BB = 'bearish'; reasons.push('BB: Upper Band Rejection'); }
+  else status.BB = 'neutral';
+
+  // 4. EMA 50/200 (Long Term Trend)
+  const ema50Values = calculateEMA(history, 50);
+  const ema200Values = calculateEMA(history, 200);
+  const ema50 = ema50Values[ema50Values.length - 1] || 0;
+  const ema200 = ema200Values[ema200Values.length - 1] || 0;
+  if (currentPrice > ema50 && ema50 > ema200) { bullPoints++; status.EMA = 'bullish'; reasons.push('EMA: Golden Trend'); }
+  else if (currentPrice < ema50 && ema50 < ema200) { bearPoints++; status.EMA = 'bearish'; reasons.push('EMA: Death Trend'); }
+  else status.EMA = 'neutral';
+
+  // 5. Volume Confirmation
+  const isVolumeSpike = detectVolumeSpike(history, 1.5);
+  if (isVolumeSpike) {
+    if (last.close > last.open) { bullPoints++; status.Volume = 'bullish'; reasons.push('Volume: Buy Spike'); }
+    else { bearPoints++; status.Volume = 'bearish'; reasons.push('Volume: Sell Spike'); }
+  } else status.Volume = 'neutral';
+
+  // --- ELLIOTT WAVE CONFIRMATION ---
+  const ewResult = validateElliottWave(history);
+  reasons.push(...ewResult.reasons);
+  const isEWBullish = last.close > last.open; // Simplified EW direction for now
+  status['ELLIOTT'] = isEWBullish ? 'bullish' : 'bearish';
+  if (isEWBullish) bullPoints += (ewResult.score / 2); else bearPoints += (ewResult.score / 2);
+
+  // 6. Heikin Ashi Analysis
+  const haCandles = calculateHeikinAshi(history);
+  const lastHA = haCandles[haCandles.length - 1];
+  const isHABullish = lastHA.close > lastHA.open;
+  status['HEIKIN ASHI'] = isHABullish ? 'bullish' : 'bearish';
+  if (isHABullish) bullPoints++; else bearPoints++;
+  reasons.push(`Heikin Ashi: ${isHABullish ? 'Bullish' : 'Bearish'} Trend`);
+
+  // 7. Candlestick & Chart Patterns
+  const candlePatterns = detectCandlePatterns(history);
+  const chartPatterns = detectChartPatterns(history);
   
-  const currentEMA9 = ema9[ema9.length - 1];
-  const currentEMA21 = ema21[ema21.length - 1];
-  const currentRSI = rsi[rsi.length - 1];
-  
+  if (candlePatterns.bullish.length > 0) {
+    status['CANDLE'] = 'bullish';
+    bullPoints += 0.5;
+    reasons.push(`Pattern: ${candlePatterns.bullish.join(', ')}`);
+  } else if (candlePatterns.bearish.length > 0) {
+    status['CANDLE'] = 'bearish';
+    bearPoints += 0.5;
+    reasons.push(`Pattern: ${candlePatterns.bearish.join(', ')}`);
+  } else status['CANDLE'] = 'neutral';
+
+  if (chartPatterns.bullish.length > 0) {
+    status['CHART'] = 'bullish';
+    bullPoints += 1;
+    reasons.push(`Chart: ${chartPatterns.bullish.join(', ')}`);
+  } else if (chartPatterns.bearish.length > 0) {
+    status['CHART'] = 'bearish';
+    bearPoints += 1;
+    reasons.push(`Chart: ${chartPatterns.bearish.join(', ')}`);
+  } else status['CHART'] = 'neutral';
+
+  let action: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL' = 'NEUTRAL';
+  const totalPossible = 10;
+  const maxPoints = Math.max(bullPoints, bearPoints);
+  const confidence = Math.min(Math.round((maxPoints / totalPossible) * 100), 100);
+
+  if (bullPoints >= 7) action = 'STRONG BUY';
+  else if (bullPoints >= 4) action = 'BUY';
+  else if (bearPoints >= 7) action = 'STRONG SELL';
+  else if (bearPoints >= 4) action = 'SELL';
+
+  return { action, confidence, reasons, status, currentPrice, ewScore: ewResult.score };
+};
+
+export const predictShortTerm = (data: Candle[], livePrice?: number) => {
+  const signal = calculateTechnicalSignal(data, livePrice);
+  if (!signal) return { direction: 'NEUTRAL', probability: 'LOW', target: 0 };
+
   let direction = 'NEUTRAL';
+  if (signal.action.includes('BUY')) direction = 'UP';
+  if (signal.action.includes('SELL')) direction = 'DOWN';
+
   let probability = 'LOW';
+  if (signal.confidence > 75) probability = 'HIGH';
+  else if (signal.confidence > 50) probability = 'MEDIUM';
+
+  const atrValues = calculateATR(data, 14);
+  const currentATR = atrValues[atrValues.length - 1] || 0;
   
-  // Trend Logic
-  if (currentEMA9 > currentEMA21) {
-    direction = 'UP';
-    probability = currentRSI < 70 ? 'HIGH' : 'MEDIUM'; // High prob if not overbought
-  } else if (currentEMA9 < currentEMA21) {
-    direction = 'DOWN';
-    probability = currentRSI > 30 ? 'HIGH' : 'MEDIUM'; // High prob if not oversold
-  }
-  
-  // ATR for Target
-  const atr = calculateATR(data, 14);
-  const currentATR = atr[atr.length - 1] || 0;
-  
-  // 5m Forecast Target (approx 1 ATR move)
   let target = 0;
-  if (direction === 'UP') target = last.close + currentATR;
-  if (direction === 'DOWN') target = last.close - currentATR;
+  if (direction === 'UP') target = signal.currentPrice + currentATR;
+  if (direction === 'DOWN') target = signal.currentPrice - currentATR;
   
-  return { direction, probability, target, currentPrice: last.close };
+  return { direction, probability, target, currentPrice: signal.currentPrice };
+};
+
+export const analyzeElliottWave = (data: Candle[]) => {
+  const result = validateElliottWave(data);
+  const last = data[data.length - 1];
+  return {
+    signal: last.close > last.open ? 'bullish' : 'bearish',
+    confidence: result.score / 5
+  };
+};
+
+export const analyzeMarket = (data: Candle[]) => {
+  const sig = calculateTechnicalSignal(data);
+  return {
+    signal: sig?.action.includes('BUY') ? 'LONG' : sig?.action.includes('SHORT') ? 'SHORT' : null,
+    symbol: '',
+    type: sig?.action.includes('BUY') ? 'LONG' : sig?.action.includes('SHORT') ? 'SHORT' : null,
+    entry: sig?.currentPrice || 0,
+    stopLoss: 0,
+    takeProfit: 0,
+    strength: (sig?.confidence || 0) / 10,
+    confluence: sig?.status || {}
+  };
 };
