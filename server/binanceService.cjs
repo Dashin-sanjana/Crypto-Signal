@@ -5,6 +5,7 @@ class BinanceService {
         this.apiKey = process.env.BINANCE_API_KEY || '';
         this.apiSecret = process.env.BINANCE_API_SECRET || '';
         this.testnet = process.env.BINANCE_TESTNET === 'true';
+        this.dryRun = process.env.BINANCE_DRY_RUN === 'true';
 
         // Use testnet or production URLs
         this.baseUrl = this.testnet
@@ -14,6 +15,12 @@ class BinanceService {
         if (!this.apiKey || !this.apiSecret) {
             console.warn('Binance API credentials not configured');
         }
+
+        console.log(`Binance Service initialized. Mode: ${this.testnet ? 'TESTNET' : 'PRODUCTION'}, Dry Run: ${this.dryRun}`);
+    }
+
+    isDryRun() {
+        return this.dryRun;
     }
 
     isTestnet() {
@@ -40,6 +47,21 @@ class BinanceService {
 
         const url = `${this.baseUrl}${endpoint}?${queryParams.toString()}`;
 
+        // Dry run: bypass mutations
+        if (this.dryRun && (method === 'POST' || method === 'DELETE')) {
+            console.log(`[DRY RUN] Simulating ${method} request to ${endpoint}`);
+            console.log(`[DRY RUN] Params:`, params);
+            
+            // Return mock success responses
+            if (endpoint === '/order') {
+                return { orderId: 'Simulated-' + Date.now(), status: 'FILLED', symbol: params.symbol };
+            }
+            if (endpoint === '/openOrders' && method === 'DELETE') {
+                return { msg: 'Simulated cancel all success' };
+            }
+            return { success: true, simulated: true };
+        }
+
         const response = await fetch(url, {
             method,
             headers: {
@@ -51,6 +73,7 @@ class BinanceService {
         const data = await response.json();
 
         if (!response.ok) {
+            console.error(`Binance API Error (${endpoint}):`, data.msg || response.status);
             throw new Error(data.msg || `API Error: ${response.status}`);
         }
 
@@ -91,7 +114,7 @@ class BinanceService {
             orderParams.timeInForce = params.timeInForce || 'GTC';
         }
 
-        console.log(`Placing ${params.type} ${params.side} order for ${params.symbol}: ${params.quantity}`);
+        console.log(`${this.dryRun ? '[DRY RUN] ' : ''}Placing ${params.type} ${params.side} order for ${params.symbol}: ${params.quantity}`);
 
         return this.signedRequest('/order', 'POST', orderParams);
     }
@@ -107,7 +130,7 @@ class BinanceService {
             timeInForce: 'GTC'
         };
 
-        console.log(`Placing stop-loss for ${symbol} at ${stopPrice}`);
+        console.log(`${this.dryRun ? '[DRY RUN] ' : ''}Placing stop-loss for ${symbol} at ${stopPrice}`);
         return this.signedRequest('/order', 'POST', params);
     }
 
@@ -122,7 +145,7 @@ class BinanceService {
             timeInForce: 'GTC'
         };
 
-        console.log(`Placing take-profit for ${symbol} at ${price}`);
+        console.log(`${this.dryRun ? '[DRY RUN] ' : ''}Placing take-profit for ${symbol} at ${price}`);
         return this.signedRequest('/order', 'POST', params);
     }
 

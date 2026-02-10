@@ -23,8 +23,8 @@ interface SignalResult {
 /**
  * 1. Elliott Wave Validation - 5 Methods
  */
-const validateElliottWave = (data: Candle[]): { score: number; reasons: string[] } => {
-  if (data.length < 50) return { score: 0, reasons: [] };
+const validateElliottWave = (data: Candle[]): { score: number; reasons: string[]; direction: 'bullish' | 'bearish' | 'neutral' } => {
+  if (data.length < 50) return { score: 0, reasons: [], direction: 'neutral' };
 
   const recent = data.slice(-50);
   const highs = recent.map(k => k.high);
@@ -35,25 +35,39 @@ const validateElliottWave = (data: Candle[]): { score: number; reasons: string[]
 
   let score = 0;
   const reasons: string[] = [];
+  
+  // Determine primary trend direction
+  const isUpTrend = currentPrice > (maxHigh + minLow) / 2;
+  const direction = isUpTrend ? 'bullish' : 'bearish';
 
   // Method 1: Impulse Pattern (Wave 3 Strength)
-  const wave3Candidate = maxHigh - minLow;
-  if (currentPrice > minLow + (wave3Candidate * 0.618)) {
-    score += 1;
-    reasons.push('Elliott: Impulsive Wave 3 detected');
+  const range = maxHigh - minLow;
+  if (isUpTrend) {
+    if (currentPrice > minLow + (range * 0.618)) {
+      score += 1;
+      reasons.push('Elliott: Bullish Impulse Wave 3 detected');
+    }
+  } else {
+    if (currentPrice < maxHigh - (range * 0.618)) {
+      score += 1;
+      reasons.push('Elliott: Bearish Impulse Wave 3 detected');
+    }
   }
 
   // Method 2: Fibonacci Retracement (Wave 2/4 Pullback)
-  const pullback = (maxHigh - currentPrice) / (maxHigh - minLow);
-  if (pullback >= 0.382 && pullback <= 0.618) {
+  const pullback = isUpTrend 
+    ? (maxHigh - currentPrice) / range 
+    : (currentPrice - minLow) / range;
+    
+  if (pullback >= 0.236 && pullback <= 0.618) {
     score += 1;
-    reasons.push('Elliott: Wave 4 Fibonacci pullback confirmed');
+    reasons.push(`Elliott: Wave ${isUpTrend ? '4' : '2'} Fibonacci pullback confirmed`);
   }
 
   // Method 3: Alternation Rule (Momentum / Volatility check)
   const atr = calculateATR(data, 14);
   const volatility = atr[atr.length - 1] || 0;
-  if (volatility > 0) {
+  if (volatility > (currentPrice * 0.001)) {
     score += 1;
     reasons.push('Elliott: Wave Alternation rule applied');
   }
@@ -63,19 +77,27 @@ const validateElliottWave = (data: Candle[]): { score: number; reasons: string[]
   const ema50Arr = calculateEMA(data, 50);
   const ema20 = ema20Arr[ema20Arr.length - 1] || 0;
   const ema50 = ema50Arr[ema50Arr.length - 1] || 0;
-  if (Math.abs(ema20 - ema50) > (currentPrice * 0.005)) {
+  if (Math.abs(ema20 - ema50) > (currentPrice * 0.003)) {
     score += 1;
     reasons.push('Elliott: Trend Channeling observed');
   }
 
-  // Method 5: Wave Extension (1.618 target mapping)
-  const target1618 = minLow + (wave3Candidate * 1.618);
-  if (currentPrice < target1618) {
-    score += 1;
-    reasons.push('Elliott: Wave Extension room identified');
+  // Method 5: Wave Extension (Target room)
+  if (isUpTrend) {
+    const target1618 = minLow + (range * 1.618);
+    if (currentPrice < target1618) {
+      score += 1;
+      reasons.push('Elliott: Bullish Extension room identified');
+    }
+  } else {
+    const target1618 = maxHigh - (range * 1.618);
+    if (currentPrice > target1618) {
+      score += 1;
+      reasons.push('Elliott: Bearish Extension room identified');
+    }
   }
 
-  return { score, reasons };
+  return { score, reasons, direction };
 };
 
 export const calculateTechnicalSignal = (data: Candle[], livePrice?: number): SignalResult | null => {
@@ -145,9 +167,9 @@ export const calculateTechnicalSignal = (data: Candle[], livePrice?: number): Si
   // --- ELLIOTT WAVE CONFIRMATION ---
   const ewResult = validateElliottWave(history);
   reasons.push(...ewResult.reasons);
-  const isEWBullish = last.close > last.open; // Simplified EW direction for now
-  status['ELLIOTT'] = isEWBullish ? 'bullish' : 'bearish';
-  if (isEWBullish) bullPoints += (ewResult.score / 2); else bearPoints += (ewResult.score / 2);
+  status['ELLIOTT'] = ewResult.direction;
+  if (ewResult.direction === 'bullish') bullPoints += (ewResult.score / 2); 
+  else if (ewResult.direction === 'bearish') bearPoints += (ewResult.score / 2);
 
   // 6. Heikin Ashi Analysis
   const haCandles = calculateHeikinAshi(history);

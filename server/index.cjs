@@ -58,8 +58,11 @@ app.post('/api/order', async (req, res) => {
         });
 
         if (!riskCheck.allowed) {
+            console.warn(`Order rejected by RiskManager: ${riskCheck.reason}`);
             return res.status(400).json({ error: riskCheck.reason });
         }
+
+        console.log(`Executing ${side} order for ${symbol}...`);
 
         // Place main order
         const order = await binance.placeOrder({
@@ -69,6 +72,8 @@ app.post('/api/order', async (req, res) => {
             quantity: riskCheck.adjustedQuantity || quantity,
             price
         });
+
+        console.log(`Main order placed successfully:`, order.orderId);
 
         // Place stop-loss if provided
         if (stopLoss && order.orderId) {
@@ -91,6 +96,7 @@ app.post('/api/order', async (req, res) => {
 
         res.json(order);
     } catch (error) {
+        console.error('Order Execution Error:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -142,15 +148,13 @@ app.get('/api/open-trades', async (req, res) => {
         // Get actual positions from Binance (account balances)
         const positions = await binance.getOpenPositions();
 
-        // List of major crypto assets we care about
-        const majorAssets = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'LINK', 'AVAX', 'MATIC', 'LTC', 'TRX', 'SHIB', 'APT', 'SUI', 'OP', 'ARB', 'INJ', 'FIL', 'ATOM', 'UNI', 'NEAR', 'PEPE', 'WIF'];
-
-        // Create a map of Binance balances by symbol
+        // Create a map of Binance balances by symbol (include all assets with balance > 0.001, exclude USDT/stablecoins)
+        const excludedAssets = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP'];
         const balanceMap = new Map();
         positions.forEach(pos => {
             const asset = pos.asset;
             const total = parseFloat(pos.free) + parseFloat(pos.locked);
-            if (total > 0.001 && majorAssets.includes(asset)) {
+            if (total > 0.001 && !excludedAssets.includes(asset)) {
                 balanceMap.set(`${asset}USDT`, total);
             }
         });
@@ -169,9 +173,10 @@ app.get('/api/open-trades', async (req, res) => {
             }
             return trade;
         }).filter(trade => {
-            // Remove trades where balance is now 0 (position was closed on Binance)
+            // Keep synced trades (still on Binance) or local trades that still have balance
+            if (trade.synced) return true;
             const actualBalance = balanceMap.get(trade.symbol);
-            return actualBalance === undefined || actualBalance > 0 || trade.synced;
+            return actualBalance !== undefined && actualBalance > 0;
         });
 
         // Add any remaining balances that aren't being tracked

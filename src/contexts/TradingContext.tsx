@@ -217,14 +217,19 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
 
     // Initial connection check and periodic refresh
     useEffect(() => {
-        checkConnection();
+        const runCheck = async () => {
+            const connected = await checkConnection();
+            if (connected) {
+                await refreshStatus(); // Fetch open positions immediately when connected
+            }
+        };
+        runCheck();
         const interval = setInterval(() => {
-            checkConnection();
-            if (isConnected) refreshStatus();
+            runCheck();
         }, 5000);
 
         return () => clearInterval(interval);
-    }, [checkConnection, refreshStatus, isConnected]);
+    }, [checkConnection, refreshStatus]);
 
     const value = {
         autoTradingEnabled,
