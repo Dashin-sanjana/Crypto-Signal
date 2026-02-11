@@ -260,3 +260,33 @@ export const analyzeMarket = (data: Candle[]) => {
     confluence: sig?.status || {}
   };
 };
+
+/** TradingView consensus: manual value user sets to match the TV widget. */
+export type TradingViewConsensus = 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+
+type AiAction = 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+
+function directionFromAiAction(action: AiAction): number {
+  if (action === 'STRONG BUY' || action === 'BUY') return 1;
+  if (action === 'STRONG SELL' || action === 'SELL') return -1;
+  return 0;
+}
+
+function directionFromTvConsensus(tv: TradingViewConsensus): number {
+  if (tv === 'STRONG BUY' || tv === 'BUY') return 1;
+  if (tv === 'STRONG SELL' || tv === 'SELL') return -1;
+  return 0;
+}
+
+/**
+ * Returns true when AI and TradingView are strongly opposite (guardrail should block trade).
+ * Hard conflict: (ai bullish and TV bearish) or (ai bearish and TV bullish).
+ */
+export function hasTradingViewConflict(
+  aiAction: AiAction,
+  tvConsensus: TradingViewConsensus
+): boolean {
+  const aiDir = directionFromAiAction(aiAction);
+  const tvDir = directionFromTvConsensus(tvConsensus);
+  return (aiDir === 1 && tvDir === -1) || (aiDir === -1 && tvDir === 1);
+}

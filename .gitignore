@@ -1,3 +1,11 @@
 node_modules
+
+node_modules/.bi
+node_modules/.pnpm
+node_modules/.vite
+
 dist
-.env
+
+# .env
+.cursor
+.vscode

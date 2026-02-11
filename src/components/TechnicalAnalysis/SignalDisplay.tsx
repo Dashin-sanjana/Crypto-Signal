@@ -1,17 +1,25 @@
 import React from 'react';
 import { usePriceContext } from '../../contexts/PriceContext';
 import { formatPrice } from '../../utils/helpers';
+import { hasTradingViewConflict } from '../../utils/analysis';
 import styles from './SignalDisplay.module.css';
 
 const SignalDisplay: React.FC = () => {
-  const { 
+  const {
     tpslData,
-    selectedSymbol, 
+    selectedSymbol,
     tradeDirection,
     setTradeDirection,
     recommendation,
-    indicatorStatus
+    indicatorStatus,
+    useTvGuardrail,
+    tradingViewConsensus
   } = usePriceContext();
+
+  const tvConflict =
+    useTvGuardrail &&
+    tradingViewConsensus &&
+    hasTradingViewConflict(recommendation.action, tradingViewConsensus);
 
   if (!tpslData || tpslData.symbol !== selectedSymbol) {
     return (
@@ -67,6 +75,11 @@ const SignalDisplay: React.FC = () => {
         <div className={styles.disclaimer}>
           *Custom AI Logic (EW + Indicators). May differ from external TradingView signals.
         </div>
+        {tvConflict && (
+          <div className={styles.conflictBadge} title="TradingView guardrail: AI and TV are opposite; auto-trade will not execute">
+            Guardrail: CONFLICT (blocked)
+          </div>
+        )}
       </div>
 
       <div className={styles.controls}>

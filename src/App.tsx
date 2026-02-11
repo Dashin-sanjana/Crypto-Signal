@@ -12,8 +12,7 @@ import NewsPanel from './components/NewsPanel/NewsPanel';
 import SignalBot from './components/SignalBot';
 import PredictionWidget from './components/PredictionWidget/PredictionWidget';
 import TechnicalAnalysis from './components/TechnicalAnalysis/TechnicalAnalysis';
-import SignalDisplay from './components/TechnicalAnalysis/SignalDisplay';
-import AutoTradingPanel from './components/AutoTrading/AutoTradingPanel';
+import TradingDashboard from './components/Trading/TradingDashboard';
 import styles from './App.module.css';
 import { supportsNotifications } from './utils/helpers';
 
@@ -43,12 +42,11 @@ function App() {
                     <div className={styles.scannerWrapper}>
                       <PredictionWidget />
                     </div>
-                    <AutoTradingPanel />
                   </aside>
 
                   <main className={styles.chartContainer}>
                     <TradingChart />
-                    <SignalDisplay />
+                    <TradingDashboard />
                   </main>
 
                   <aside className={styles.rightSidebar}>

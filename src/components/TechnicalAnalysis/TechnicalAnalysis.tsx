@@ -1,9 +1,26 @@
 import React, { useEffect, useRef, memo } from 'react';
 import { usePriceContext } from '../../contexts/PriceContext';
+import type { TradingViewConsensus } from '../../utils/analysis';
 import styles from './TechnicalAnalysis.module.css';
 
+const TV_OPTIONS: { value: '' | TradingViewConsensus; label: string }[] = [
+  { value: '', label: 'Not set' },
+  { value: 'STRONG SELL', label: 'Strong Sell' },
+  { value: 'SELL', label: 'Sell' },
+  { value: 'NEUTRAL', label: 'Neutral' },
+  { value: 'BUY', label: 'Buy' },
+  { value: 'STRONG BUY', label: 'Strong Buy' }
+];
+
 const TechnicalAnalysis: React.FC = () => {
-  const { selectedSymbol, timeframe } = usePriceContext();
+  const {
+    selectedSymbol,
+    timeframe,
+    useTvGuardrail,
+    setUseTvGuardrail,
+    tradingViewConsensus,
+    setTradingViewConsensus
+  } = usePriceContext();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -12,7 +29,7 @@ const TechnicalAnalysis: React.FC = () => {
     // Standard TV widget loading pattern
     const container = containerRef.current;
     container.innerHTML = '';
-    
+
     const widgetContainer = document.createElement('div');
     widgetContainer.className = "tradingview-widget-container__widget";
     container.appendChild(widgetContainer);
@@ -39,6 +56,36 @@ const TechnicalAnalysis: React.FC = () => {
     <div className={`${styles.widget} glass-panel`}>
       <div className={styles.header}>
         <span className={styles.title}>External Consensus (TradingView)</span>
+      </div>
+      <div className={styles.guardrailRow}>
+        <label className={styles.guardrailLabel}>
+          <input
+            type="checkbox"
+            checked={useTvGuardrail}
+            onChange={(e) => setUseTvGuardrail(e.target.checked)}
+          />
+          <span>Use TradingView as guardrail</span>
+        </label>
+        {useTvGuardrail && (
+          <label className={styles.tvSaysLabel}>
+            <span>TradingView says:</span>
+            <select
+              className={styles.tvSelect}
+              value={tradingViewConsensus ?? ''}
+              onChange={(e) =>
+                setTradingViewConsensus(
+                  e.target.value ? (e.target.value as TradingViewConsensus) : null
+                )
+              }
+            >
+              {TV_OPTIONS.map((opt) => (
+                <option key={opt.value || 'none'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className={styles.container} ref={containerRef}></div>
     </div>

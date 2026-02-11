@@ -4,6 +4,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 const { BinanceService } = require('./binanceService.cjs');
 const { RiskManager } = require('./riskManager.cjs');
+const { TelegramBotService } = require('./telegramBot.cjs');
 
 // Load env from project root
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -18,6 +19,13 @@ app.use(express.json());
 // Initialize services
 const binance = new BinanceService();
 const riskManager = new RiskManager();
+const telegramBot = new TelegramBotService();
+
+// Setup Telegram bot commands if enabled
+if (telegramBot.isEnabled()) {
+    telegramBot.setupCommands(riskManager, binance);
+    // Message is logged inside setupCommands based on enableCommands flag
+}
 
 // Health check
 app.get('/health', (req, res) => {
@@ -86,13 +94,27 @@ app.post('/api/order', async (req, res) => {
         }
 
         // Track the trade
+        const executedPrice = order.fills?.[0]?.price || price;
+        const executedQuantity = riskCheck.adjustedQuantity || quantity;
+        
         riskManager.recordTrade({
             symbol,
             side,
-            quantity: riskCheck.adjustedQuantity || quantity,
-            price: order.fills?.[0]?.price || price,
+            quantity: executedQuantity,
+            price: executedPrice,
             orderId: order.orderId
         });
+
+        // Send Telegram notification
+        if (telegramBot.isEnabled()) {
+            telegramBot.sendTradeExecution(
+                symbol,
+                side,
+                executedQuantity,
+                executedPrice,
+                order.orderId
+            ).catch(err => console.error('Failed to send Telegram notification:', err));
+        }
 
         res.json(order);
     } catch (error) {
@@ -117,6 +139,14 @@ app.post('/api/kill-switch', async (req, res) => {
     try {
         const result = await binance.emergencyCloseAll();
         riskManager.activateKillSwitch();
+        
+        // Send Telegram notification
+        if (telegramBot.isEnabled()) {
+            telegramBot.sendKillSwitchAlert().catch(err => 
+                console.error('Failed to send Telegram notification:', err)
+            );
+        }
+        
         res.json({ success: true, result });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -137,6 +167,33 @@ app.post('/api/risk-reset', (req, res) => {
 // Get trade history
 app.get('/api/trades', (req, res) => {
     res.json(riskManager.getTradeHistory());
+});
+
+// Send signal alert via Telegram
+app.post('/api/telegram/signal', async (req, res) => {
+    try {
+        const { symbol, action, confidence, price, reason, tpSlData } = req.body;
+        
+        if (!symbol || !action) {
+            return res.status(400).json({ error: 'Missing required fields: symbol, action' });
+        }
+
+        // Debug logging
+        console.log('[Telegram Signal] Received:', { symbol, action, confidence, price, hasTpSlData: !!tpSlData });
+        if (tpSlData) {
+            console.log('[Telegram Signal] TP/SL Data:', tpSlData);
+        }
+
+        if (telegramBot.isEnabled()) {
+            await telegramBot.sendSignal(symbol, action, confidence, price, reason, tpSlData);
+            res.json({ success: true, message: 'Signal sent to Telegram' });
+        } else {
+            res.json({ success: false, message: 'Telegram bot not configured' });
+        }
+    } catch (error) {
+        console.error('Failed to send signal alert:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Get open trades - syncs tracked trades with actual Binance balances

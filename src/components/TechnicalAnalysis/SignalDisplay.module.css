@@ -364,6 +364,18 @@
   text-align: center;
 }
 
+.conflictBadge {
+  margin-top: 10px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 .indicatorGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { WATCHLIST, BINANCE_WS_BASE, BINANCE_API_BASE } from '../utils/constants';
-import { calculateTechnicalSignal } from '../utils/analysis';
+import { calculateTechnicalSignal, type TradingViewConsensus } from '../utils/analysis';
+
+const TV_GUARDRAIL_STORAGE_KEY = 'crypto_signal_use_tv_guardrail';
+const TV_CONSENSUS_STORAGE_KEY = 'crypto_signal_tv_consensus';
 
 interface PriceData {
   symbol: string;
@@ -40,6 +43,13 @@ interface SymbolInfo {
   quoteAsset: string;
 }
 
+interface MultiSymbolSignal {
+  action: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+  confidence: number;
+  currentPrice: number;
+  updatedAt: number;
+}
+
 interface PriceContextType {
   prices: Record<string, PriceData>;
   priceHistory: Record<string, Candle[]>;
@@ -51,7 +61,8 @@ interface PriceContextType {
   fetchKlineData: (symbol: string, interval?: string, limit?: number) => Promise<Candle[]>;
   allSymbols: SymbolInfo[];
   tpslData: TPSLData | null;
-  watchlist: { symbol: string; name: string; ticker: string }[];
+  watchlist: { symbol: string; name: string; ticker: string; autoTradeEnabled?: boolean }[];
+  setWatchlist: React.Dispatch<React.SetStateAction<{ symbol: string; name: string; ticker: string; autoTradeEnabled?: boolean }[]>>;
   addToWatchlist: (symbol: SymbolInfo) => void;
   setupTimeframe: string;
   setSetupTimeframe: (tf: string) => void;
@@ -66,6 +77,11 @@ interface PriceContextType {
     ewScore: number;
   };
   indicatorStatus: Record<string, 'bullish' | 'bearish' | 'neutral'>;
+  multiSymbolSignals: Record<string, MultiSymbolSignal>;
+  useTvGuardrail: boolean;
+  setUseTvGuardrail: (v: boolean) => void;
+  tradingViewConsensus: TradingViewConsensus | null;
+  setTradingViewConsensus: (v: TradingViewConsensus | null) => void;
 }
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
@@ -92,7 +108,9 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
   const [setupTimeframe, setSetupTimeframe] = useState<string>('5m'); // Strictly 5m for predictions
   const [liquidationPrice, setLiquidationPrice] = useState<number | null>(null);
   const [tpslData, setTpslData] = useState<TPSLData | null>(null);
-  const [watchlist, setWatchlist] = useState(WATCHLIST);
+  const [watchlist, setWatchlist] = useState(
+    WATCHLIST.map(item => ({ ...item, autoTradeEnabled: false }))
+  );
   const [activeConnections, setActiveConnections] = useState<Record<string, WebSocket>>({});
   const [tradeDirection, setTradeDirection] = useState<TradeDirection>('BUY');
   const [recommendation, setRecommendation] = useState<{
@@ -102,6 +120,57 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     ewScore: number;
   }>({ action: 'NEUTRAL', confidence: 0, reasons: [], ewScore: 0 });
   const [indicatorStatus, setIndicatorStatus] = useState<Record<string, 'bullish' | 'bearish' | 'neutral'>>({});
+  const [multiSymbolSignals, setMultiSymbolSignals] = useState<Record<string, MultiSymbolSignal>>({});
+
+  const [useTvGuardrail, setUseTvGuardrailState] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(TV_GUARDRAIL_STORAGE_KEY);
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [tvConsensusBySymbol, setTvConsensusBySymbol] = useState<Record<string, TradingViewConsensus>>(() => {
+    try {
+      const stored = localStorage.getItem(TV_CONSENSUS_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, string>;
+        return parsed as Record<string, TradingViewConsensus>;
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+
+  const setUseTvGuardrail = useCallback((v: boolean) => {
+    setUseTvGuardrailState(v);
+    try {
+      localStorage.setItem(TV_GUARDRAIL_STORAGE_KEY, String(v));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const tradingViewConsensus = tvConsensusBySymbol[selectedSymbol] ?? null;
+
+  const setTradingViewConsensus = useCallback((v: TradingViewConsensus | null) => {
+    setTvConsensusBySymbol(prev => {
+      const next = v
+        ? { ...prev, [selectedSymbol]: v }
+        : (() => {
+          const { [selectedSymbol]: _, ...rest } = prev;
+          return rest;
+        })();
+      try {
+        localStorage.setItem(TV_CONSENSUS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [selectedSymbol]);
 
   // Fetch all available symbols from Binance
   useEffect(() => {
@@ -158,6 +227,30 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     fetchKlineData(selectedSymbol, setupTimeframe, 50); // Consistent 50 candles
     setLiquidationPrice(null);
   }, [selectedSymbol, setupTimeframe, fetchKlineData]);
+
+  // Fetch price history for all auto-trade enabled symbols
+  useEffect(() => {
+    const eligible = watchlist.filter(w => w.autoTradeEnabled).map(w => w.symbol);
+    if (eligible.length === 0) return;
+
+    console.log(`[PriceContext] Fetching price history for ${eligible.length} auto-trade enabled symbols:`, eligible);
+
+    eligible.forEach(symbol => {
+      const historyKey = `${symbol}_${setupTimeframe}`;
+      if (!priceHistory[historyKey] || priceHistory[historyKey].length < 20) {
+        console.log(`[PriceContext] Fetching price history for ${symbol} (${setupTimeframe})`);
+        fetchKlineData(symbol, setupTimeframe, 50).then(candles => {
+          if (candles.length >= 20) {
+            console.log(`[PriceContext] ✓ Fetched ${candles.length} candles for ${symbol}`);
+          } else {
+            console.warn(`[PriceContext] ⚠ Insufficient candles for ${symbol}: ${candles.length}`);
+          }
+        });
+      } else {
+        console.log(`[PriceContext] Price history already exists for ${symbol}: ${priceHistory[historyKey].length} candles`);
+      }
+    });
+  }, [watchlist, setupTimeframe, fetchKlineData, priceHistory]);
 
   // Helper to find swing points for Fibonacci
   const getSwingPoints = useCallback((klines: Candle[]) => {
@@ -229,6 +322,77 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
       });
     }
   }, [prices, selectedSymbol, priceHistory, setupTimeframe, tradeDirection, getSwingPoints]);
+
+  // Compute technical signals for all auto-trade-enabled symbols (multi-coin mode)
+  // Runs periodically every 30 seconds to keep signals updated
+  useEffect(() => {
+    const eligible = watchlist.filter(w => w.autoTradeEnabled).map(w => w.symbol);
+    if (eligible.length === 0) {
+      console.log('[PriceContext] No auto-trade enabled symbols, skipping signal computation');
+      return;
+    }
+
+    let cancelled = false;
+    const SIGNAL_REFRESH_INTERVAL = 30000; // 30 seconds
+
+    const computeSignals = async () => {
+      if (cancelled) return;
+      
+      console.log(`[PriceContext] Computing signals for ${eligible.length} symbols:`, eligible);
+      
+      for (const symbol of eligible) {
+        if (cancelled) return;
+
+        const price = prices[symbol]?.price;
+        if (!price) {
+          console.log(`[PriceContext] ⚠ No price data for ${symbol}, skipping signal computation`);
+          continue;
+        }
+
+        let history = priceHistory[`${symbol}_${setupTimeframe}`];
+        if (!history || history.length < 20) {
+          console.log(`[PriceContext] Fetching missing price history for ${symbol}`);
+          history = await fetchKlineData(symbol, setupTimeframe, 50);
+        }
+        if (!history || history.length < 20) {
+          console.warn(`[PriceContext] ⚠ Insufficient history for ${symbol}: ${history?.length || 0} candles`);
+          continue;
+        }
+
+        const signal = calculateTechnicalSignal(history, price);
+        if (!signal) {
+          console.warn(`[PriceContext] ⚠ Failed to calculate signal for ${symbol}`);
+          continue;
+        }
+
+        console.log(`[PriceContext] ✓ Signal computed for ${symbol}: ${signal.action} (${signal.confidence}%)`);
+
+        setMultiSymbolSignals(prev => ({
+          ...prev,
+          [symbol]: {
+            action: signal.action,
+            confidence: signal.confidence,
+            currentPrice: signal.currentPrice,
+            updatedAt: Date.now()
+          }
+        }));
+      }
+    };
+
+    // Run immediately
+    computeSignals();
+
+    // Then run periodically
+    const interval = setInterval(() => {
+      computeSignals();
+    }, SIGNAL_REFRESH_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      console.log('[PriceContext] Signal computation stopped');
+    };
+  }, [watchlist, prices, priceHistory, setupTimeframe, fetchKlineData]);
 
   // Connect to Binance WebSocket for real-time prices
   const connectWebSocket = useCallback((symbol: string) => {
@@ -315,7 +479,12 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     tradeDirection,
     setTradeDirection,
     recommendation,
-    indicatorStatus
+    indicatorStatus,
+    multiSymbolSignals,
+    useTvGuardrail,
+    setUseTvGuardrail,
+    tradingViewConsensus,
+    setTradingViewConsensus
   };
 
   return (
