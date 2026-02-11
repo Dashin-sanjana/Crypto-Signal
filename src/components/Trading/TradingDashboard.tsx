@@ -4,15 +4,15 @@ import { useTradingContext } from '../../contexts/TradingContext';
 import SignalDisplay from '../TechnicalAnalysis/SignalDisplay';
 import AutoTradingPanel from '../AutoTrading/AutoTradingPanel';
 import styles from './TradingDashboard.module.css';
+import PredictionWidget from '../PredictionWidget/PredictionWidget';
+import TechnicalAnalysis from '../TechnicalAnalysis/TechnicalAnalysis';
 
 const TradingDashboard: React.FC = () => {
   const {
     selectedSymbol,
     prices,
     recommendation,
-    tpslData,
     tradeDirection,
-    watchlist,
     multiSymbolSignals,
   } = usePriceContext();
 
@@ -100,8 +100,15 @@ const TradingDashboard: React.FC = () => {
       <div className={styles.mainGrid}>
         {/* Left: Signal & Conditions */}
         <div className={styles.leftColumn}>
-          <SignalDisplay />
-
+          <div className={styles.technicalAnalysis}>
+            <TechnicalAnalysis />
+          </div>
+          <div className={styles.signalDisplay}>
+            <SignalDisplay />
+          </div>
+          <div className={styles.predictionWidget}>
+            <PredictionWidget />
+          </div>
           <div className={styles.conditionsCard}>
             <div className={styles.sectionTitle}>Auto-Trade Conditions</div>
             <ul className={styles.conditionList}>

@@ -260,3 +260,104 @@ p {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* Basic UI primitives (shadcn-style) */
+.ui-card {
+  background: var(--glass-bg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-premium);
+  padding: var(--spacing-md);
+}
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.ui-button--default {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: var(--bg-primary);
+  box-shadow: var(--glow-accent);
+}
+
+.ui-button--outline {
+  background: transparent;
+  border-color: var(--glass-border);
+  color: var(--text-secondary);
+}
+
+.ui-button--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ui-button--sm {
+  padding: 0.25rem 0.75rem;
+}
+
+.ui-button--md {
+  padding: 0.45rem 1rem;
+}
+
+.ui-button--lg {
+  padding: 0.6rem 1.25rem;
+}
+
+.ui-button:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.ui-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.ui-tabs__list {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--glass-border);
+}
+
+.ui-tabs__trigger {
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ui-tabs__trigger:hover {
+  color: var(--text-primary);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.ui-tabs__trigger--active {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: var(--bg-primary);
+  box-shadow: var(--glow-accent);
+}
+
+.ui-tabs__content {
+  width: 100%;
+}
+
+.ui-scroll-area {
+  overflow: auto;
+}

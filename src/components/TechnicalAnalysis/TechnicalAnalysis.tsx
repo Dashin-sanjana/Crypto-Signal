@@ -24,32 +24,41 @@ const TechnicalAnalysis: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !selectedSymbol) return;
 
-    // Standard TV widget loading pattern
     const container = containerRef.current;
     container.innerHTML = '';
 
+    // Replicate TradingView's expected DOM structure as closely as possible
+    const tvOuter = document.createElement('div');
+    tvOuter.className = 'tradingview-widget-container';
+
     const widgetContainer = document.createElement('div');
-    widgetContainer.className = "tradingview-widget-container__widget";
-    container.appendChild(widgetContainer);
+    widgetContainer.className = 'tradingview-widget-container__widget';
+    tvOuter.appendChild(widgetContainer);
 
     const script = document.createElement('script');
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js";
+    script.src =
+      'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
     script.async = true;
     script.innerHTML = JSON.stringify({
-      "interval": timeframe,
-      "width": "100%",
-      "isTransparent": true,
-      "height": "100%",
-      "symbol": `BINANCE:${selectedSymbol}`,
-      "showIntervalTabs": true,
-      "displayMode": "single",
-      "locale": "en",
-      "colorTheme": "dark"
+      interval: timeframe,
+      width: '100%',
+      isTransparent: true,
+      height: 360,
+      symbol: `BINANCE:${selectedSymbol}`,
+      showIntervalTabs: true,
+      displayMode: 'single',
+      locale: 'en',
+      colorTheme: 'dark',
     });
 
-    container.appendChild(script);
+    tvOuter.appendChild(script);
+    container.appendChild(tvOuter);
+
+    return () => {
+      container.innerHTML = '';
+    };
   }, [selectedSymbol, timeframe]);
 
   return (

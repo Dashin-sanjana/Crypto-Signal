@@ -1,19 +1,16 @@
 import { useEffect } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import { PriceProvider } from './contexts/PriceContext';
 import { SignalProvider } from './contexts/SignalContext';
 import { NewsProvider } from './contexts/NewsContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { TradingProvider } from './contexts/TradingContext';
-import Header from './components/Header/Header';
-import Watchlist from './components/Watchlist/Watchlist';
-import TradingChart from './components/TradingChart/TradingChart';
-import NewsPanel from './components/NewsPanel/NewsPanel';
 import SignalBot from './components/SignalBot';
-import PredictionWidget from './components/PredictionWidget/PredictionWidget';
-import TechnicalAnalysis from './components/TechnicalAnalysis/TechnicalAnalysis';
-import TradingDashboard from './components/Trading/TradingDashboard';
-import styles from './App.module.css';
+import AppShell from './layouts/AppShell';
+import DashboardPage from './pages/DashboardPage';
+import BotControlPage from './pages/BotControlPage';
+import SettingsPage from './pages/SettingsPage';
 import { supportsNotifications } from './utils/helpers';
 
 function App() {
@@ -31,29 +28,12 @@ function App() {
           <SignalProvider>
             <NewsProvider>
               <SignalBot />
-              <div className={styles.app}>
-                <div className={`${styles.bgGlow} ${styles.bgGlowTopLeft}`} />
-                <div className={`${styles.bgGlow} ${styles.bgGlowBottomRight}`} />
-                <Header />
-
-                <div className={styles.mainContainer}>
-                  <aside className={styles.leftSidebar}>
-                    <Watchlist />
-                    <div className={styles.scannerWrapper}>
-                      <PredictionWidget />
-                    </div>
-                  </aside>
-
-                  <main className={styles.chartContainer}>
-                    <TradingChart />
-                    <TradingDashboard />
-                  </main>
-
-                  <aside className={styles.rightSidebar}>
-                    <TechnicalAnalysis />
-                    <NewsPanel />
-                  </aside>
-                </div>
+              <AppShell>
+                <Routes>
+                  <Route path="/" element={<DashboardPage />} />
+                  <Route path="/bot" element={<BotControlPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                </Routes>
 
                 <ToastContainer
                   position="bottom-right"
@@ -67,7 +47,7 @@ function App() {
                   pauseOnHover
                   theme="dark"
                 />
-              </div>
+              </AppShell>
             </NewsProvider>
           </SignalProvider>
         </TradingProvider>

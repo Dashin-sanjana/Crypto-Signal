@@ -129,6 +129,13 @@
   font-weight: 600;
 }
 
+.emptyState {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: var(--spacing-md);
+}
+
 .loading {
   color: var(--text-muted);
   font-size: 0.75rem;
