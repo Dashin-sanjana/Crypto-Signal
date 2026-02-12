@@ -75,6 +75,16 @@ class BinanceFuturesService {
         return lotSize || null;
     }
 
+    async getNotionalFilter(symbol) {
+        const info = await this.getExchangeInfo();
+        const sym = info.symbols?.find((s) => s.symbol === symbol);
+        if (!sym) return null;
+        const notional = sym.filters?.find(
+            (f) => f.filterType === 'NOTIONAL' || f.filterType === 'MIN_NOTIONAL'
+        );
+        return notional || null;
+    }
+
     _formatQuantityForLotSize(quantity, stepSizeStr) {
         const step = stepSizeStr || '0.001';
         const frac = step.includes('.') ? step.split('.')[1] : '';
@@ -228,12 +238,53 @@ class BinanceFuturesService {
     }
 
     async placeOrder(params) {
-        const roundedQty = await this.roundQuantityToLotSize(params.symbol, params.quantity);
-        const lot = await this.getLotSizeFilter(params.symbol);
+        const symbol = params.symbol;
+        const isReduceOnly = !!params.reduceOnly;
+
+        // Derive a working price for MIN_NOTIONAL checks – prefer explicit price, fall back to latest price
+        const priceForNotional = params.price || (await this.getCurrentPrice(symbol));
+
+        // Start from strategy / risk-managed quantity
+        let effectiveQty = params.quantity;
+        let minNotionalUsdt = null;
+
+        // For opening orders (non-reduce-only), enforce Binance NOTIONAL/MIN_NOTIONAL filter
+        if (!isReduceOnly && priceForNotional > 0) {
+            const notionalFilter = await this.getNotionalFilter(symbol);
+            if (notionalFilter) {
+                const rawMinNotional =
+                    notionalFilter.minNotional != null
+                        ? parseFloat(notionalFilter.minNotional)
+                        : notionalFilter.notional != null
+                            ? parseFloat(notionalFilter.notional)
+                            : NaN;
+
+                const envFallback = parseFloat(process.env.BINANCE_MIN_NOTIONAL_USDT || '0');
+                const useFallback = !rawMinNotional || !Number.isFinite(rawMinNotional);
+
+                const minNotional = useFallback && envFallback > 0 ? envFallback : rawMinNotional;
+
+                if (minNotional && Number.isFinite(minNotional) && minNotional > 0) {
+                    minNotionalUsdt = minNotional;
+                    const desiredNotional = effectiveQty * priceForNotional;
+                    if (desiredNotional < minNotional) {
+                        const requiredQty = minNotional / priceForNotional;
+                        console.warn(
+                            `[BinanceFutures] Quantity ${effectiveQty} for ${symbol} below MIN_NOTIONAL=${minNotional} USDT at price=${priceForNotional}. ` +
+                                `Bumping to ${requiredQty}.`
+                        );
+                        effectiveQty = requiredQty;
+                    }
+                }
+            }
+        }
+
+        const roundedQty = await this.roundQuantityToLotSize(symbol, effectiveQty);
+        const lot = await this.getLotSizeFilter(symbol);
         const qtyStr = lot ? this._formatQuantityForLotSize(roundedQty, lot.stepSize) : String(roundedQty);
 
         const orderParams = {
-            symbol: params.symbol,
+            symbol,
             side: params.side,
             type: params.type,
             quantity: qtyStr
@@ -243,7 +294,7 @@ class BinanceFuturesService {
             orderParams.positionSide = params.positionSide;
         }
 
-        if (params.reduceOnly) {
+        if (isReduceOnly) {
             orderParams.reduceOnly = 'true';
         }
 
@@ -252,8 +303,13 @@ class BinanceFuturesService {
             orderParams.timeInForce = params.timeInForce || 'GTC';
         }
 
+        const finalQtyNum = parseFloat(qtyStr);
+        const finalNotional = priceForNotional * finalQtyNum;
+
         console.log(
-            `${this.dryRun ? '[DRY RUN] ' : ''}Placing ${params.type} ${params.side} order for ${params.symbol}: ${qtyStr} (requested: ${params.quantity})`
+            `${this.dryRun ? '[DRY RUN] ' : ''}Placing ${params.type} ${params.side} order for ${symbol}: ${qtyStr} (requested: ${params.quantity}, ` +
+                `effective: ${effectiveQty}, notional: ${finalNotional.toFixed(2)} USDT${minNotionalUsdt ? `, minNotional: ${minNotionalUsdt} USDT` : ''}, ` +
+                `reduceOnly: ${isReduceOnly})`
         );
 
         return this.signedRequest('/v1/order', 'POST', orderParams);

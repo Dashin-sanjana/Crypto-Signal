@@ -45,7 +45,7 @@ app.get('/health', (req, res) => {
     } catch (err) {
         dbStatus = 'error';
     }
-    res.json({ status: 'ok', testnet: binance.isTestnet(), db: dbStatus });
+    res.json({ status: 'ok', testnet: binance.isTestnet(), dryRun: binance.isDryRun(), db: dbStatus });
 });
 
 // Get account info
@@ -184,7 +184,13 @@ app.post('/api/order', async (req, res) => {
 
         res.json(order);
     } catch (error) {
-        console.error('Order Execution Error:', error.message);
+        console.error('Order Execution Error:', {
+            message: error.message,
+            symbol: req.body?.symbol,
+            side: req.body?.side,
+            requestedQuantity: req.body?.quantity,
+            type: req.body?.type || 'MARKET'
+        });
         res.status(500).json({ error: error.message });
     }
 });
