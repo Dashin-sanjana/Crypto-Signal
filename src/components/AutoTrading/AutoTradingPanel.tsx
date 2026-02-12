@@ -129,8 +129,8 @@ const AutoTradingPanel: React.FC = () => {
                             <div className={styles.statValue}>${riskStatus.dailyLossLimit}</div>
                         </div>
                         <div className={styles.statCard}>
-                            <div className={styles.statLabel}>Open Trades</div>
-                            <div className={styles.statValue}>{riskStatus.openTradesCount}/{riskStatus.maxOpenTrades}</div>
+                            <div className={styles.statLabel} title="Count matches the open positions list below (from exchange + bot)">Open Trades</div>
+                            <div className={styles.statValue}>{openTrades.length}/{riskStatus.maxOpenTrades}</div>
                         </div>
                         <div className={styles.statCard}>
                             <div className={styles.statLabel}>Position Size</div>
@@ -155,17 +155,19 @@ const AutoTradingPanel: React.FC = () => {
             </div>
 
             <div className={styles.openTrades}>
-                <div className={styles.sectionTitle}>Open Positions</div>
+                <div className={styles.sectionTitle} id="open-positions">
+                    Open positions ({openTrades.length})
+                </div>
                 {openTrades.length > 0 ? (
                     <div className={styles.tradesList}>
                         {openTrades.map((trade, idx) => (
                             <div
-                                key={idx}
+                                key={trade.orderId || idx}
                                 className={`${styles.tradeItem} ${trade.side === 'BUY' ? styles.tradeBuy : styles.tradeSell}`}
                             >
                                 <span className={styles.tradeSymbol}>{trade.symbol}</span>
                                 <span className={styles.tradeDetails}>
-                                    {trade.side} {trade.quantity.toFixed(4)} @ ${trade.price.toFixed(2)}
+                                    {trade.side} {trade.quantity.toFixed(4)} @ ${trade.price > 0 ? trade.price.toFixed(2) : '—'}
                                 </span>
                             </div>
                         ))}

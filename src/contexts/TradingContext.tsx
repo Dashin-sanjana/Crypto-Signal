@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { usePriceContext } from './PriceContext';
-import { hasTradingViewConflict } from '../utils/analysis';
 
 const TRADING_API_URL = import.meta.env.VITE_TRADING_API_URL || 'http://localhost:3001';
 
@@ -80,7 +79,7 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
     const [botLog, setBotLog] = useState<BotLogEntry[]>([]);
     const lastLogRef = React.useRef<{ symbol?: string; type: BotLogEntry['type']; message: string } | null>(null);
 
-    const { prices, selectedSymbol, tpslData, recommendation, tradeDirection, watchlist, multiSymbolSignals, priceHistory, useTvGuardrail, tradingViewConsensus } = usePriceContext();
+    const { prices, selectedSymbol, tpslData, recommendation, tradeDirection, watchlist, multiSymbolSignals, priceHistory, useTvGuardrail, tradingViewConsensus, getTradingViewConsensus } = usePriceContext();
 
     const logEvent = useCallback((entry: Omit<BotLogEntry, 'timestamp'>) => {
         const last = lastLogRef.current;
@@ -251,15 +250,34 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
             return;
         }
 
-        // Check if signal is strong enough (with permissive rule)
-        const strength = isStrongEnough(recommendation.action, recommendation.confidence);
-        if (!strength.ok) {
-            logEvent({
-                type: 'INFO',
-                symbol: selectedSymbol,
-                message: `[SINGLE] Auto-trade skipped: signal not strong enough (${recommendation.action}, ${recommendation.confidence}% < ${strength.threshold}%)`
-            });
-            return;
+        let effectiveAction: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+        let effectiveConfidence: number;
+
+        if (useTvGuardrail) {
+            if (!tradingViewConsensus || (tradingViewConsensus !== 'STRONG BUY' && tradingViewConsensus !== 'STRONG SELL')) {
+                logEvent({
+                    type: 'INFO',
+                    symbol: selectedSymbol,
+                    message: tradingViewConsensus
+                        ? `[SINGLE] Auto-trade skipped: TradingView guardrail on but signal is not Strong Buy/Strong Sell (got ${tradingViewConsensus})`
+                        : '[SINGLE] Auto-trade skipped: TradingView guardrail on but TradingView signal not set'
+                });
+                return;
+            }
+            effectiveAction = tradingViewConsensus;
+            effectiveConfidence = 100;
+        } else {
+            const strength = isStrongEnough(recommendation.action, recommendation.confidence);
+            if (!strength.ok) {
+                logEvent({
+                    type: 'INFO',
+                    symbol: selectedSymbol,
+                    message: `[SINGLE] Auto-trade skipped: signal not strong enough (${recommendation.action}, ${recommendation.confidence}% < ${strength.threshold}%)`
+                });
+                return;
+            }
+            effectiveAction = recommendation.action;
+            effectiveConfidence = recommendation.confidence;
         }
 
         // Check if we already have a position in this symbol
@@ -273,7 +291,7 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         }
 
         // Determine trade direction from signal
-        const signalSide = recommendation.action.includes('BUY') ? 'BUY' : 'SELL';
+        const signalSide = effectiveAction.includes('BUY') ? 'BUY' : 'SELL';
 
         // Only trade if signal matches our selected direction
         if ((signalSide === 'BUY' && tradeDirection !== 'BUY') ||
@@ -282,16 +300,6 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 type: 'INFO',
                 symbol: selectedSymbol,
                 message: `[SINGLE] Auto-trade skipped: signal side ${signalSide} does not match selected direction ${tradeDirection}`
-            });
-            return;
-        }
-
-        // TradingView guardrail: block if AI and TV are strongly opposite
-        if (useTvGuardrail && tradingViewConsensus && hasTradingViewConflict(recommendation.action, tradingViewConsensus)) {
-            logEvent({
-                type: 'INFO',
-                symbol: selectedSymbol,
-                message: `[SINGLE] Auto-trade skipped: TradingView guardrail (AI ${recommendation.action} vs TV ${tradingViewConsensus})`
             });
             return;
         }
@@ -312,10 +320,10 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         // Send signal alert before placing order (with TP/SL data)
         sendSignalAlert(
             selectedSymbol,
-            recommendation.action,
-            recommendation.confidence,
+            effectiveAction,
+            effectiveConfidence,
             currentPrice,
-            `Auto-trade triggered: ${recommendation.action} signal with ${recommendation.confidence}% confidence`,
+            `Auto-trade triggered: ${effectiveAction} signal with ${effectiveConfidence}% confidence`,
             tpslData ? {
                 entry: currentPrice,
                 tp1: tpslData.tp1,
@@ -399,37 +407,54 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                     });
                     continue;
                 }
-                if (!signal) {
-                    logEvent({
-                        type: 'INFO',
-                        symbol,
-                        message: '[MULTI] auto-trade skipped: no signal yet for symbol'
-                    });
-                    continue;
+
+                let effectiveAction: string;
+                let effectiveConfidence: number;
+
+                if (useTvGuardrail) {
+                    const symbolTvConsensus = getTradingViewConsensus(symbol);
+                    if (!symbolTvConsensus || (symbolTvConsensus !== 'STRONG BUY' && symbolTvConsensus !== 'STRONG SELL')) {
+                        if (symbolTvConsensus) {
+                            logEvent({
+                                type: 'INFO',
+                                symbol,
+                                message: `[MULTI] auto-trade skipped: TradingView signal not Strong Buy/Strong Sell (got ${symbolTvConsensus})`
+                            });
+                        } else {
+                            logEvent({
+                                type: 'INFO',
+                                symbol,
+                                message: '[MULTI] auto-trade skipped: TradingView signal not set for symbol'
+                            });
+                        }
+                        continue;
+                    }
+                    effectiveAction = symbolTvConsensus;
+                    effectiveConfidence = 100;
+                } else {
+                    if (!signal) {
+                        logEvent({
+                            type: 'INFO',
+                            symbol,
+                            message: '[MULTI] auto-trade skipped: no signal yet for symbol'
+                        });
+                        continue;
+                    }
+                    const strength = isStrongEnough(signal.action, signal.confidence);
+                    if (!strength.ok) {
+                        logEvent({
+                            type: 'INFO',
+                            symbol,
+                            message: `[MULTI] auto-trade skipped: signal not strong enough (${signal.action}, ${signal.confidence}% < ${strength.threshold}%)`
+                        });
+                        continue;
+                    }
+                    effectiveAction = signal.action;
+                    effectiveConfidence = signal.confidence;
                 }
 
-                const strength = isStrongEnough(signal.action, signal.confidence);
-                if (!strength.ok) {
-                    logEvent({
-                        type: 'INFO',
-                        symbol,
-                        message: `[MULTI] auto-trade skipped: signal not strong enough (${signal.action}, ${signal.confidence}% < ${strength.threshold}%)`
-                    });
-                    continue;
-                }
-
-                // TradingView guardrail: only when this symbol is selected and we have TV consensus
-                if (symbol === selectedSymbol && useTvGuardrail && tradingViewConsensus && hasTradingViewConflict(signal.action, tradingViewConsensus)) {
-                    logEvent({
-                        type: 'INFO',
-                        symbol,
-                        message: `[MULTI] auto-trade skipped: TradingView guardrail (AI ${signal.action} vs TV ${tradingViewConsensus})`
-                    });
-                    continue;
-                }
-
-                const signalSide = signal.action.includes('BUY') ? 'BUY' : 'SELL';
-                const quantity = (riskStatus.maxPositionSize / signal.currentPrice);
+                const signalSide = effectiveAction.includes('BUY') ? 'BUY' : 'SELL';
+                const quantity = (riskStatus.maxPositionSize / (signal?.currentPrice ?? price));
 
                 logEvent({
                     type: 'INFO',
@@ -438,7 +463,7 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 });
 
                 // Calculate TP/SL for multi-symbol auto-trade
-                const isBuy = signal.action.includes('BUY');
+                const isBuy = signalSide === 'BUY';
                 const tp1 = isBuy ? price * 1.02 : price * 0.98;
                 const tp2 = isBuy ? price * 1.05 : price * 0.95;
                 const sl = isBuy ? price * 0.98 : price * 1.02;
@@ -447,10 +472,10 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 // Send signal alert before placing order
                 sendSignalAlert(
                     symbol,
-                    signal.action,
-                    signal.confidence,
+                    effectiveAction,
+                    effectiveConfidence,
                     price,
-                    `Auto-trade triggered: ${signal.action} signal with ${signal.confidence}% confidence`,
+                    `Auto-trade triggered: ${effectiveAction} signal with ${effectiveConfidence}% confidence`,
                     {
                         entry: price,
                         tp1,
@@ -490,125 +515,87 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         logEvent,
         sendSignalAlert,
         isStrongEnough,
-        selectedSymbol,
         useTvGuardrail,
-        tradingViewConsensus
+        getTradingViewConsensus
     ]);
 
-    // Monitor and send signal alerts for strong signals (even when auto-trade is disabled)
-    // Prioritizes multiSymbolSignals over recommendation (selected symbol)
+    // Monitor and send signal alerts for strong signals on a fixed interval (avoid spam on every price/signal update)
     const lastSignalAlertRef = React.useRef<Record<string, { action: string; confidence: number; timestamp: number }>>({});
-    
+    const alertDataRef = React.useRef({
+        multiSymbolSignals: {} as Record<string, { action: string; confidence: number; currentPrice: number; updatedAt: number }>,
+        prices: {} as Record<string, { price: number }>,
+        recommendation: null as { action: string; confidence: number } | null,
+        selectedSymbol: '',
+        tpslData: null as { entry: number; tp1: number; tp2: number; sl: number; rr: number; direction: string } | null,
+        getEligibleSymbols: (): string[] => []
+    });
+
+    React.useEffect(() => {
+        alertDataRef.current = {
+            multiSymbolSignals,
+            prices,
+            recommendation,
+            selectedSymbol,
+            tpslData,
+            getEligibleSymbols
+        };
+    }, [multiSymbolSignals, prices, recommendation, selectedSymbol, tpslData, getEligibleSymbols]);
+
     useEffect(() => {
         if (!isConnected) return;
 
-        const MIN_CONFIDENCE_FOR_ALERT = 60; // Only alert on signals with 60%+ confidence
-        const ALERT_COOLDOWN = 5 * 60 * 1000; // 5 minutes cooldown per symbol
+        const MIN_CONFIDENCE_FOR_ALERT = 60;
+        const ALERT_COOLDOWN_MS = 5 * 60 * 1000; // 5 min per symbol
+        const CHECK_INTERVAL_MS = 5 * 60 * 1000;  // Evaluate at most every 5 min
 
-        // PRIMARY: Check multi-symbol signals for ALL BOT-enabled coins
-        const eligibleSymbols = getEligibleSymbols();
-        console.log(`[TradingContext] Monitoring signals for ${eligibleSymbols.length} BOT-enabled symbols:`, eligibleSymbols);
-        
-        eligibleSymbols.forEach(symbol => {
-            const signal = multiSymbolSignals[symbol];
-            if (!signal) {
-                console.log(`[TradingContext] No signal data for ${symbol} yet`);
-                return;
-            }
-            
-            if (!prices[symbol]?.price) {
-                console.log(`[TradingContext] No price data for ${symbol}`);
-                return;
-            }
-            
-            const { action, confidence } = signal;
-            const isStrongSignal = (action === 'STRONG BUY' || action === 'STRONG SELL' || 
-                                   (action === 'BUY' || action === 'SELL') && confidence >= MIN_CONFIDENCE_FOR_ALERT);
-            
-            if (isStrongSignal) {
-                const lastAlert = lastSignalAlertRef.current[symbol];
+        const runAlertCheck = () => {
+            const { multiSymbolSignals: signals, prices: pricesMap, recommendation: rec, selectedSymbol: selSym, tpslData: tpsl, getEligibleSymbols: getEligible } = alertDataRef.current;
+            const eligibleSymbols = getEligible();
+
+            eligibleSymbols.forEach((symbol: string) => {
+                const signal = signals[symbol];
+                if (!signal || !pricesMap[symbol]?.price) return;
+
+                const { action, confidence } = signal;
+                const isStrong = (action === 'STRONG BUY' || action === 'STRONG SELL') || ((action === 'BUY' || action === 'SELL') && confidence >= MIN_CONFIDENCE_FOR_ALERT);
+                if (!isStrong) return;
+
+                const last = lastSignalAlertRef.current[symbol];
                 const now = Date.now();
-                
-                if (!lastAlert || 
-                    lastAlert.action !== action || 
-                    (now - lastAlert.timestamp) > ALERT_COOLDOWN) {
-                    
-                    // Calculate TP/SL for signal alert
-                    const currentPrice = prices[symbol].price;
-                    const isBuy = action.includes('BUY');
-                    const tp1 = isBuy ? currentPrice * 1.02 : currentPrice * 0.98;
-                    const tp2 = isBuy ? currentPrice * 1.05 : currentPrice * 0.95;
-                    const sl = isBuy ? currentPrice * 0.98 : currentPrice * 1.02;
-                    const rr = ((tp2 - currentPrice) / Math.abs(currentPrice - sl));
+                if (last && last.action === action && (now - last.timestamp) < ALERT_COOLDOWN_MS) return;
 
-                    console.log(`[TradingContext] 📤 Sending Telegram alert for ${symbol}: ${action} (${confidence}%)`);
+                const currentPrice = pricesMap[symbol].price;
+                const isBuy = action.includes('BUY');
+                const tp1 = isBuy ? currentPrice * 1.02 : currentPrice * 0.98;
+                const tp2 = isBuy ? currentPrice * 1.05 : currentPrice * 0.95;
+                const sl = isBuy ? currentPrice * 0.98 : currentPrice * 1.02;
+                const rr = (tp2 - currentPrice) / Math.abs(currentPrice - sl);
 
-                    sendSignalAlert(
-                        symbol,
-                        action,
-                        confidence,
-                        currentPrice,
-                        `Strong signal detected: ${action} with ${confidence}% confidence`,
-                        {
-                            entry: currentPrice,
-                            tp1,
-                            tp2,
-                            sl,
-                            rr,
-                            direction: isBuy ? 'BUY' : 'SELL'
-                        }
-                    );
-                    
-                    lastSignalAlertRef.current[symbol] = { action, confidence, timestamp: now };
-                } else {
-                    console.log(`[TradingContext] Alert cooldown active for ${symbol}, skipping`);
-                }
-            } else {
-                console.log(`[TradingContext] Signal for ${symbol} not strong enough: ${action} (${confidence}% < ${MIN_CONFIDENCE_FOR_ALERT}%)`);
+                sendSignalAlert(symbol, action, confidence, currentPrice, `Strong signal: ${action} (${confidence}%)`, {
+                    entry: currentPrice, tp1, tp2, sl, rr, direction: isBuy ? 'BUY' : 'SELL'
+                });
+                lastSignalAlertRef.current[symbol] = { action, confidence, timestamp: now };
+            });
+
+            if (rec && selSym && pricesMap[selSym]?.price && !eligibleSymbols.includes(selSym)) {
+                const { action, confidence } = rec;
+                const isStrong = (action === 'STRONG BUY' || action === 'STRONG SELL') || ((action === 'BUY' || action === 'SELL') && confidence >= MIN_CONFIDENCE_FOR_ALERT);
+                if (!isStrong) return;
+
+                const last = lastSignalAlertRef.current[selSym];
+                const now = Date.now();
+                if (last && last.action === action && (now - last.timestamp) < ALERT_COOLDOWN_MS) return;
+
+                sendSignalAlert(selSym, action, confidence, pricesMap[selSym].price, `Strong signal: ${action} (${confidence}%)`, tpsl ? {
+                    entry: tpsl.entry, tp1: tpsl.tp1, tp2: tpsl.tp2, sl: tpsl.sl, rr: tpsl.rr, direction: tpsl.direction
+                } : undefined);
+                lastSignalAlertRef.current[selSym] = { action, confidence, timestamp: now };
             }
-        });
+        };
 
-        // FALLBACK: Also check selected symbol if it's not in the eligible list
-        // (This handles the case where selected symbol might not be BOT-enabled)
-        if (recommendation && selectedSymbol && prices[selectedSymbol]?.price) {
-            // Only send if not already handled by multi-symbol signals above
-            if (!eligibleSymbols.includes(selectedSymbol)) {
-                const { action, confidence } = recommendation;
-                const isStrongSignal = (action === 'STRONG BUY' || action === 'STRONG SELL' || 
-                                       (action === 'BUY' || action === 'SELL') && confidence >= MIN_CONFIDENCE_FOR_ALERT);
-                
-                if (isStrongSignal) {
-                    const lastAlert = lastSignalAlertRef.current[selectedSymbol];
-                    const now = Date.now();
-                    
-                    if (!lastAlert || 
-                        lastAlert.action !== action || 
-                        (now - lastAlert.timestamp) > ALERT_COOLDOWN) {
-                        
-                        console.log(`[TradingContext] 📤 Sending Telegram alert for selected symbol ${selectedSymbol}: ${action} (${confidence}%)`);
-                        
-                        sendSignalAlert(
-                            selectedSymbol,
-                            action,
-                            confidence,
-                            prices[selectedSymbol].price,
-                            `Strong signal detected: ${action} with ${confidence}% confidence`,
-                            tpslData ? {
-                                entry: tpslData.entry,
-                                tp1: tpslData.tp1,
-                                tp2: tpslData.tp2,
-                                sl: tpslData.sl,
-                                rr: tpslData.rr,
-                                direction: tpslData.direction
-                            } : undefined
-                        );
-                        
-                        lastSignalAlertRef.current[selectedSymbol] = { action, confidence, timestamp: now };
-                    }
-                }
-            }
-        }
-    }, [isConnected, multiSymbolSignals, prices, getEligibleSymbols, sendSignalAlert, recommendation, selectedSymbol, tpslData]);
+        const interval = setInterval(runAlertCheck, CHECK_INTERVAL_MS);
+        return () => clearInterval(interval);
+    }, [isConnected, sendSignalAlert]);
 
     // Initial connection check and periodic refresh
     useEffect(() => {
@@ -621,7 +608,7 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         runCheck();
         const interval = setInterval(() => {
             runCheck();
-        }, 5000);
+        }, 30000);
 
         return () => clearInterval(interval);
     }, [checkConnection, refreshStatus]);

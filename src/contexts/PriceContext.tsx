@@ -82,6 +82,8 @@ interface PriceContextType {
   setUseTvGuardrail: (v: boolean) => void;
   tradingViewConsensus: TradingViewConsensus | null;
   setTradingViewConsensus: (v: TradingViewConsensus | null) => void;
+  /** Get TradingView consensus for any symbol (used by guardrail in multi-symbol mode). */
+  getTradingViewConsensus: (symbol: string) => TradingViewConsensus | null;
 }
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
@@ -171,6 +173,8 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
       return next;
     });
   }, [selectedSymbol]);
+
+  const getTradingViewConsensus = useCallback((symbol: string) => tvConsensusBySymbol[symbol] ?? null, [tvConsensusBySymbol]);
 
   // Fetch all available symbols from Binance
   useEffect(() => {
@@ -484,7 +488,8 @@ export const PriceProvider: React.FC<PriceProviderProps> = ({ children }) => {
     useTvGuardrail,
     setUseTvGuardrail,
     tradingViewConsensus,
-    setTradingViewConsensus
+    setTradingViewConsensus,
+    getTradingViewConsensus
   };
 
   return (

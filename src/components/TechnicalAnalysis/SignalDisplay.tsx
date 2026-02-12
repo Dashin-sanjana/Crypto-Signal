@@ -1,7 +1,6 @@
 import React from 'react';
 import { usePriceContext } from '../../contexts/PriceContext';
 import { formatPrice } from '../../utils/helpers';
-import { hasTradingViewConflict } from '../../utils/analysis';
 import styles from './SignalDisplay.module.css';
 
 const SignalDisplay: React.FC = () => {
@@ -16,10 +15,8 @@ const SignalDisplay: React.FC = () => {
     tradingViewConsensus
   } = usePriceContext();
 
-  const tvConflict =
-    useTvGuardrail &&
-    tradingViewConsensus &&
-    hasTradingViewConflict(recommendation.action, tradingViewConsensus);
+  const tvDrivingSignal = useTvGuardrail && (tradingViewConsensus === 'STRONG BUY' || tradingViewConsensus === 'STRONG SELL');
+  const tvNotSet = useTvGuardrail && !tradingViewConsensus;
 
   if (!tpslData || tpslData.symbol !== selectedSymbol) {
     return (
@@ -75,9 +72,14 @@ const SignalDisplay: React.FC = () => {
         <div className={styles.disclaimer}>
           *Custom AI Logic (EW + Indicators). May differ from external TradingView signals.
         </div>
-        {tvConflict && (
-          <div className={styles.conflictBadge} title="TradingView guardrail: AI and TV are opposite; auto-trade will not execute">
-            Guardrail: CONFLICT (blocked)
+        {tvDrivingSignal && (
+          <div className={styles.tvSourceBadge} title="Bot uses TradingView as the trading signal when guardrail is on">
+            Signal source: TradingView ({tradingViewConsensus})
+          </div>
+        )}
+        {tvNotSet && (
+          <div className={styles.conflictBadge} title="Set TradingView signal (Strong Buy or Strong Sell) to allow auto-trade">
+            Set TradingView signal to trade
           </div>
         )}
       </div>

@@ -5,11 +5,8 @@ import styles from './TechnicalAnalysis.module.css';
 
 const TV_OPTIONS: { value: '' | TradingViewConsensus; label: string }[] = [
   { value: '', label: 'Not set' },
-  { value: 'STRONG SELL', label: 'Strong Sell' },
-  { value: 'SELL', label: 'Sell' },
-  { value: 'NEUTRAL', label: 'Neutral' },
-  { value: 'BUY', label: 'Buy' },
-  { value: 'STRONG BUY', label: 'Strong Buy' }
+  { value: 'STRONG BUY', label: 'Strong Buy' },
+  { value: 'STRONG SELL', label: 'Strong Sell' }
 ];
 
 const TechnicalAnalysis: React.FC = () => {
@@ -77,7 +74,7 @@ const TechnicalAnalysis: React.FC = () => {
         </label>
         {useTvGuardrail && (
           <label className={styles.tvSaysLabel}>
-            <span>TradingView says:</span>
+            <span>TradingView signal:</span>
             <select
               className={styles.tvSelect}
               value={tradingViewConsensus ?? ''}
@@ -86,6 +83,7 @@ const TechnicalAnalysis: React.FC = () => {
                   e.target.value ? (e.target.value as TradingViewConsensus) : null
                 )
               }
+              title="Set to match the widget (Strong Buy or Strong Sell only)"
             >
               {TV_OPTIONS.map((opt) => (
                 <option key={opt.value || 'none'} value={opt.value}>
@@ -93,6 +91,7 @@ const TechnicalAnalysis: React.FC = () => {
                 </option>
               ))}
             </select>
+            <span className={styles.tvHint}>Set to match widget</span>
           </label>
         )}
       </div>

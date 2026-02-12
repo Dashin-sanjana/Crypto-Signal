@@ -203,9 +203,9 @@ const TradingDashboard: React.FC = () => {
           </div>
 
           <div className={styles.positionsCard}>
-            <div className={styles.sectionTitle}>Open Positions</div>
+            <div className={styles.sectionTitle}>Open positions ({openTrades.length})</div>
             {openTrades.length === 0 ? (
-              <div className={styles.emptyState}>No open positions</div>
+              <div className={styles.emptyState}>No open positions. List shows positions from the exchange and trades opened by the bot.</div>
             ) : (
               <table className={styles.table}>
                 <thead>
@@ -218,11 +218,11 @@ const TradingDashboard: React.FC = () => {
                 </thead>
                 <tbody>
                   {openTrades.map((t, idx) => (
-                    <tr key={idx}>
+                    <tr key={t.orderId || idx}>
                       <td>{t.symbol}</td>
                       <td>{t.side}</td>
                       <td>{t.quantity.toFixed(4)}</td>
-                      <td>{t.price.toFixed(4)}</td>
+                      <td>{t.price > 0 ? t.price.toFixed(4) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

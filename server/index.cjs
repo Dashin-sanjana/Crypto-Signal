@@ -82,6 +82,7 @@ app.post('/api/order', async (req, res) => {
         });
 
         console.log(`Main order placed successfully:`, order.orderId);
+        binance.invalidateAccountCache();
 
         // Place stop-loss if provided
         if (stopLoss && order.orderId) {
@@ -138,6 +139,7 @@ app.delete('/api/orders/:symbol', async (req, res) => {
 app.post('/api/kill-switch', async (req, res) => {
     try {
         const result = await binance.emergencyCloseAll();
+        binance.invalidateAccountCache();
         riskManager.activateKillSwitch();
         
         // Send Telegram notification
@@ -169,23 +171,30 @@ app.get('/api/trades', (req, res) => {
     res.json(riskManager.getTradeHistory());
 });
 
+// Dedupe Telegram signals: same symbol+action within cooldown = skip send
+const TELEGRAM_SIGNAL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const lastTelegramSignalByKey = new Map(); // key = `${symbol}:${action}`
+
 // Send signal alert via Telegram
 app.post('/api/telegram/signal', async (req, res) => {
     try {
         const { symbol, action, confidence, price, reason, tpSlData } = req.body;
-        
+
         if (!symbol || !action) {
             return res.status(400).json({ error: 'Missing required fields: symbol, action' });
         }
 
-        // Debug logging
-        console.log('[Telegram Signal] Received:', { symbol, action, confidence, price, hasTpSlData: !!tpSlData });
-        if (tpSlData) {
-            console.log('[Telegram Signal] TP/SL Data:', tpSlData);
+        const dedupeKey = `${symbol}:${action}`;
+        const now = Date.now();
+        const last = lastTelegramSignalByKey.get(dedupeKey);
+        if (last != null && (now - last) < TELEGRAM_SIGNAL_COOLDOWN_MS) {
+            res.json({ success: true, message: 'Signal deduplicated (cooldown)' });
+            return;
         }
 
         if (telegramBot.isEnabled()) {
             await telegramBot.sendSignal(symbol, action, confidence, price, reason, tpSlData);
+            lastTelegramSignalByKey.set(dedupeKey, now);
             res.json({ success: true, message: 'Signal sent to Telegram' });
         } else {
             res.json({ success: false, message: 'Telegram bot not configured' });

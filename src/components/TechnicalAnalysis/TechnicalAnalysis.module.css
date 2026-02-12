@@ -52,6 +52,12 @@
   cursor: pointer;
 }
 
+.tvHint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .title {
   font-weight: 700;
   color: var(--text-secondary);

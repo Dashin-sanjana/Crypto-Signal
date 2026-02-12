@@ -13,12 +13,18 @@ class TelegramBotService {
         this.bot = null;
         this.enabled = false;
 
+        // Rate limiting: min interval between sends (ms). Telegram allows ~30 msg/s but 429 suggests burst limit.
+        this._minIntervalMs = parseInt(process.env.TELEGRAM_MIN_INTERVAL_MS || '2000', 10) || 2000;
+        this._lastSendTime = 0;
+        this._sendQueue = [];
+        this._processingQueue = false;
+
         if (this.token && this.chatId) {
             try {
                 this.bot = new TelegramBot(this.token, { polling: this.enableCommands });
                 this.enabled = true;
                 const mode = this.enableCommands ? 'with commands' : 'signals only';
-                console.log(`Telegram bot initialized (${mode} mode)`);
+                console.log(`Telegram bot initialized (${mode} mode, min interval ${this._minIntervalMs}ms)`);
             } catch (error) {
                 console.error('Failed to initialize Telegram bot:', error.message);
                 this.enabled = false;
@@ -29,24 +35,77 @@ class TelegramBotService {
     }
 
     /**
-     * Send a message to the configured chat
+     * Send a message to the configured chat (rate-limited; queues if needed).
      */
     async sendMessage(text, options = {}) {
         if (!this.enabled || !this.bot) {
-            console.log('[Telegram] Would send:', text);
+            console.log('[Telegram] Would send:', text?.substring?.(0, 80));
             return false;
         }
 
-        try {
-            await this.bot.sendMessage(this.chatId, text, {
-                parse_mode: 'HTML',
-                ...options
-            });
-            return true;
-        } catch (error) {
-            console.error('Telegram send error:', error.message);
-            return false;
+        return new Promise((resolve) => {
+            const maxQueue = 15;
+            if (this._sendQueue.length >= maxQueue) {
+                this._sendQueue.shift();
+            }
+            this._sendQueue.push({ text, options, resolve });
+            this._processSendQueue();
+        });
+    }
+
+    async _processSendQueue() {
+        if (this._processingQueue || this._sendQueue.length === 0) return;
+
+        this._processingQueue = true;
+
+        while (this._sendQueue.length > 0) {
+            const now = Date.now();
+            const wait = this._lastSendTime + this._minIntervalMs - now;
+            if (wait > 0) {
+                await new Promise((r) => setTimeout(r, wait));
+            }
+
+            const item = this._sendQueue.shift();
+            if (!item) break;
+
+            try {
+                this._lastSendTime = Date.now();
+                await this.bot.sendMessage(this.chatId, item.text, {
+                    parse_mode: 'HTML',
+                    ...item.options
+                });
+                item.resolve(true);
+            } catch (error) {
+                console.error('Telegram send error:', error.message);
+
+                // On 429, wait retry-after then retry this message once
+                const retryAfter = this._parseRetryAfter(error);
+                if (retryAfter > 0) {
+                    console.log(`[Telegram] Rate limited; waiting ${retryAfter}s before retry`);
+                    await new Promise((r) => setTimeout(r, retryAfter * 1000));
+                    try {
+                        await this.bot.sendMessage(this.chatId, item.text, {
+                            parse_mode: 'HTML',
+                            ...item.options
+                        });
+                        item.resolve(true);
+                    } catch (retryErr) {
+                        console.error('Telegram retry error:', retryErr.message);
+                        item.resolve(false);
+                    }
+                } else {
+                    item.resolve(false);
+                }
+            }
         }
+
+        this._processingQueue = false;
+    }
+
+    _parseRetryAfter(error) {
+        const msg = error.message || '';
+        const match = msg.match(/retry after (\d+)/i);
+        return match ? parseInt(match[1], 10) : 0;
     }
 
     /**
@@ -55,13 +114,7 @@ class TelegramBotService {
     async sendSignal(symbol, action, confidence, price, reason, tpSlData = null) {
         const emoji = action.includes('BUY') ? '🟢' : action.includes('SELL') ? '🔴' : '⚪';
         const direction = action.includes('BUY') ? 'LONG' : action.includes('SELL') ? 'SHORT' : 'NEUTRAL';
-        
-        // Debug logging
-        console.log('[Telegram Bot] sendSignal called with tpSlData:', tpSlData ? 'YES' : 'NO');
-        if (tpSlData) {
-            console.log('[Telegram Bot] tpSlData content:', JSON.stringify(tpSlData, null, 2));
-        }
-        
+
         let message = `
 ${emoji} <b>Signal Alert</b>
 ━━━━━━━━━━━━━━━━
@@ -75,7 +128,6 @@ ${emoji} <b>Signal Alert</b>
 
         // Add trade setup if provided
         if (tpSlData) {
-            console.log('[Telegram Bot] Processing tpSlData:', JSON.stringify(tpSlData, null, 2));
             const { entry, tp1, tp2, sl, rr, direction: tradeDir } = tpSlData;
             
             // Always add trade setup section if tpSlData exists
@@ -122,10 +174,6 @@ ${emoji} <b>Signal Alert</b>
             }
             
             message += `━━━━━━━━━━━━━━━━`;
-            
-            console.log('[Telegram Bot] Message after adding TP/SL:', message.substring(0, 200) + '...');
-        } else {
-            console.log('[Telegram Bot] No tpSlData provided, skipping trade setup');
         }
 
         // Add reason if provided

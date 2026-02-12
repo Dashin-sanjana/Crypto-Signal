@@ -10,11 +10,21 @@ interface OrderParams {
     timeInForce?: 'GTC' | 'IOC' | 'FOK';
 }
 
+interface LotSizeFilter {
+    filterType: string;
+    minQty: string;
+    maxQty: string;
+    stepSize: string;
+}
+
 export class BinanceService {
     private apiKey: string;
     private apiSecret: string;
     private baseUrl: string;
     private testnet: boolean;
+    private exchangeInfoCache: any = null;
+    private exchangeInfoCacheTime = 0;
+    private readonly exchangeInfoCacheTtlMs = 60 * 60 * 1000;
 
     constructor() {
         this.apiKey = process.env.BINANCE_API_KEY || '';
@@ -29,6 +39,51 @@ export class BinanceService {
         if (!this.apiKey || !this.apiSecret) {
             console.warn('Binance API credentials not configured');
         }
+    }
+
+    private async getExchangeInfo(): Promise<any> {
+        const now = Date.now();
+        if (this.exchangeInfoCache && now - this.exchangeInfoCacheTime < this.exchangeInfoCacheTtlMs) {
+            return this.exchangeInfoCache;
+        }
+        const response = await fetch(`${this.baseUrl}/exchangeInfo`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.msg || 'Failed to fetch exchange info');
+        this.exchangeInfoCache = data;
+        this.exchangeInfoCacheTime = now;
+        return data;
+    }
+
+    private async getLotSizeFilter(symbol: string): Promise<LotSizeFilter | null> {
+        const info = await this.getExchangeInfo();
+        const sym = info.symbols?.find((s: any) => s.symbol === symbol);
+        if (!sym) return null;
+        const lotSize = sym.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+        return lotSize || null;
+    }
+
+    private async roundQuantityToLotSize(symbol: string, quantity: number): Promise<number> {
+        const lot = await this.getLotSizeFilter(symbol);
+        if (!lot) return quantity;
+
+        const minQty = parseFloat(lot.minQty);
+        const maxQty = parseFloat(lot.maxQty);
+        const stepSize = parseFloat(lot.stepSize);
+
+        if (quantity <= 0) return minQty;
+
+        const precision = stepSize < 1 ? (lot.stepSize.toString().split('.')[1]?.length || 8) : 0;
+        const steps = Math.floor(quantity / stepSize);
+        let rounded = steps * stepSize;
+        rounded = parseFloat(rounded.toFixed(precision));
+
+        return Math.min(maxQty, Math.max(minQty, rounded));
+    }
+
+    private formatQuantityForLotSize(quantity: number, stepSizeStr: string): string {
+        const frac = stepSizeStr?.includes('.') ? stepSizeStr.split('.')[1] : '';
+        const decimals = frac ? frac.replace(/0+$/, '').length : 0;
+        return quantity.toFixed(Math.min(decimals, 8));
     }
 
     isTestnet(): boolean {
@@ -98,11 +153,15 @@ export class BinanceService {
     }
 
     async placeOrder(params: OrderParams): Promise<any> {
+        const roundedQty = await this.roundQuantityToLotSize(params.symbol, params.quantity);
+        const lot = await this.getLotSizeFilter(params.symbol);
+        const qtyStr = lot ? this.formatQuantityForLotSize(roundedQty, lot.stepSize) : String(roundedQty);
+
         const orderParams: Record<string, any> = {
             symbol: params.symbol,
             side: params.side,
             type: params.type,
-            quantity: params.quantity.toFixed(6)
+            quantity: qtyStr
         };
 
         if (params.type === 'LIMIT' && params.price) {
@@ -110,7 +169,7 @@ export class BinanceService {
             orderParams.timeInForce = params.timeInForce || 'GTC';
         }
 
-        console.log(`Placing ${params.type} ${params.side} order for ${params.symbol}: ${params.quantity}`);
+        console.log(`Placing ${params.type} ${params.side} order for ${params.symbol}: ${qtyStr} (requested: ${params.quantity})`);
 
         return this.signedRequest('/order', 'POST', orderParams);
     }
@@ -121,13 +180,17 @@ export class BinanceService {
         quantity: number,
         stopPrice: number
     ): Promise<any> {
+        const roundedQty = await this.roundQuantityToLotSize(symbol, quantity);
+        const lot = await this.getLotSizeFilter(symbol);
+        const qtyStr = lot ? this.formatQuantityForLotSize(roundedQty, lot.stepSize) : String(roundedQty);
+
         const params: Record<string, any> = {
             symbol,
             side,
             type: 'STOP_LOSS_LIMIT',
-            quantity: quantity.toFixed(6),
+            quantity: qtyStr,
             stopPrice: stopPrice.toFixed(2),
-            price: stopPrice.toFixed(2), // For STOP_LOSS_LIMIT, price is required
+            price: stopPrice.toFixed(2),
             timeInForce: 'GTC'
         };
 
@@ -141,11 +204,15 @@ export class BinanceService {
         quantity: number,
         price: number
     ): Promise<any> {
+        const roundedQty = await this.roundQuantityToLotSize(symbol, quantity);
+        const lot = await this.getLotSizeFilter(symbol);
+        const qtyStr = lot ? this.formatQuantityForLotSize(roundedQty, lot.stepSize) : String(roundedQty);
+
         const params: Record<string, any> = {
             symbol,
             side,
             type: 'TAKE_PROFIT_LIMIT',
-            quantity: quantity.toFixed(6),
+            quantity: qtyStr,
             stopPrice: price.toFixed(2),
             price: price.toFixed(2),
             timeInForce: 'GTC'
