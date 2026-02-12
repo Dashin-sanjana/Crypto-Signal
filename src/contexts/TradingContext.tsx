@@ -342,7 +342,7 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
             logEvent({
                 type: 'INFO',
                 symbol: d.selectedSymbol,
-                message: `[SINGLE] Placing ${signalSide} order, qty ≈ ${quantity.toFixed(6)} based on max position size ${d.riskStatus!.maxPositionSize}`
+                message: `[SINGLE] Sending order: side=${signalSide}, qty=${quantity.toFixed(6)}, entry=${currentPrice.toFixed(2)}, sl=${d.tpslData?.sl?.toFixed(2)}, tp2=${d.tpslData?.tp2?.toFixed(2)} (maxPositionSize=${d.riskStatus!.maxPositionSize})`
             });
 
             sendSignalAlert(
@@ -367,14 +367,22 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 quantity,
                 stopLoss: d.tpslData?.sl,
                 takeProfit: d.tpslData?.tp2
-            }).catch(error => {
-                console.error('Auto-trade failed:', error);
-                logEvent({
-                    type: 'ERROR',
-                    symbol: d.selectedSymbol,
-                    message: '[SINGLE] Auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+            })
+                .then(() => {
+                    logEvent({
+                        type: 'INFO',
+                        symbol: d.selectedSymbol,
+                        message: '[SINGLE] Order placed successfully (backend accepted)'
+                    });
+                })
+                .catch(error => {
+                    console.error('Auto-trade failed:', error);
+                    logEvent({
+                        type: 'ERROR',
+                        symbol: d.selectedSymbol,
+                        message: '[SINGLE] Auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+                    });
                 });
-            });
         };
 
         run();
@@ -470,12 +478,6 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 const signalSide = effectiveAction.includes('BUY') ? 'BUY' : 'SELL';
                 const quantity = (riskStatus.maxPositionSize / (signal?.currentPrice ?? price));
 
-                logEvent({
-                    type: 'INFO',
-                    symbol,
-                    message: `[MULTI] placing ${signalSide} order, qty ≈ ${quantity.toFixed(6)}`
-                });
-
                 // Calculate TP/SL for multi-symbol auto-trade
                 const isBuy = signalSide === 'BUY';
                 const tp1 = isBuy ? price * 1.02 : price * 0.98;
@@ -500,19 +502,33 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                     }
                 );
 
+                logEvent({
+                    type: 'INFO',
+                    symbol,
+                    message: `[MULTI] Sending order: side=${signalSide}, qty=${quantity.toFixed(6)}, entry=${price.toFixed(2)}, sl=${sl.toFixed(2)}, tp2=${tp2.toFixed(2)}`
+                });
+
                 placeOrder({
                     symbol,
                     side: signalSide,
                     quantity,
                     stopLoss: sl,
                     takeProfit: tp2
-                }).catch(error => {
-                    logEvent({
-                        type: 'ERROR',
-                        symbol,
-                        message: '[MULTI] auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+                })
+                    .then(() => {
+                        logEvent({
+                            type: 'INFO',
+                            symbol,
+                            message: '[MULTI] Order placed successfully (backend accepted)'
+                        });
+                    })
+                    .catch(error => {
+                        logEvent({
+                            type: 'ERROR',
+                            symbol,
+                            message: '[MULTI] auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+                        });
                     });
-                });
             }
         };
 

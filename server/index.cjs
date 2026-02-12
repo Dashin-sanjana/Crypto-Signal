@@ -75,6 +75,8 @@ app.post('/api/order', async (req, res) => {
     try {
         const { symbol, side, quantity, type = 'MARKET', price, stopLoss, takeProfit, source } = req.body;
 
+        console.log('[ORDER] Incoming', { symbol, side, quantity, type, price, stopLoss, takeProfit, source });
+
         if (db.hasOpenTradeInDb(symbol)) {
             return res.status(400).json({ error: `Already have open position in ${symbol} (from DB)` });
         }
@@ -107,16 +109,44 @@ app.post('/api/order', async (req, res) => {
             price
         });
 
-        console.log(`Main order placed successfully:`, order.orderId);
+        console.log('[ORDER] Main filled', {
+            symbol,
+            side,
+            requestedQuantity: quantity,
+            executedQuantity: riskCheck.adjustedQuantity || quantity,
+            orderId: order.orderId
+        });
         binance.invalidateAccountCache();
 
         // Place stop-loss / take-profit if provided
         if (stopLoss && order.orderId) {
-            await binance.placeStopLoss(symbol, side === 'BUY' ? 'SELL' : 'BUY', riskCheck.adjustedQuantity || quantity, stopLoss);
+            const slResult = await binance.placeStopLoss(
+                symbol,
+                side === 'BUY' ? 'SELL' : 'BUY',
+                riskCheck.adjustedQuantity || quantity,
+                stopLoss
+            );
+            console.log('[ORDER] SL created', {
+                symbol,
+                side: side === 'BUY' ? 'SELL' : 'BUY',
+                stopLoss,
+                slResult
+            });
         }
 
         if (takeProfit && order.orderId) {
-            await binance.placeTakeProfit(symbol, side === 'BUY' ? 'SELL' : 'BUY', riskCheck.adjustedQuantity || quantity, takeProfit);
+            const tpResult = await binance.placeTakeProfit(
+                symbol,
+                side === 'BUY' ? 'SELL' : 'BUY',
+                riskCheck.adjustedQuantity || quantity,
+                takeProfit
+            );
+            console.log('[ORDER] TP created', {
+                symbol,
+                side: side === 'BUY' ? 'SELL' : 'BUY',
+                takeProfit,
+                tpResult
+            });
         }
 
         // Track the trade
