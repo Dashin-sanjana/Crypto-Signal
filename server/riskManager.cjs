@@ -1,8 +1,8 @@
 class RiskManager {
-    constructor() {
-        this.maxPositionSize = parseFloat(process.env.VITE_MAX_POSITION_SIZE || '50');
-        this.dailyLossLimit = parseFloat(process.env.VITE_DAILY_LOSS_LIMIT || '100');
-        this.maxOpenTrades = 5;
+    constructor(options = {}) {
+        this.maxPositionSize = options.maxPositionSize ?? parseFloat(process.env.VITE_MAX_POSITION_SIZE || '50');
+        this.dailyLossLimit = options.dailyLossLimit ?? parseFloat(process.env.VITE_DAILY_LOSS_LIMIT || '100');
+        this.maxOpenTrades = options.maxOpenTrades ?? 5;
         this.dailyPnL = 0;
         this.openTrades = new Map();
         this.tradeHistory = [];
@@ -144,6 +144,12 @@ class RiskManager {
 
     getTradeHistory() {
         return this.tradeHistory;
+    }
+
+    updateSettings(settings) {
+        if (settings.maxPositionSize != null) this.maxPositionSize = Number(settings.maxPositionSize);
+        if (settings.dailyLossLimit != null) this.dailyLossLimit = Number(settings.dailyLossLimit);
+        if (settings.maxOpenTrades != null) this.maxOpenTrades = Math.max(0, Math.floor(Number(settings.maxOpenTrades)));
     }
 }
 

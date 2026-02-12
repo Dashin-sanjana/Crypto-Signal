@@ -237,136 +237,150 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         }
     }, [refreshStatus, logEvent]);
 
-    // Auto-execute trades based on signals
-    useEffect(() => {
-        if (!autoTradingEnabled || !isConnected || !tpslData || !riskStatus?.tradingAllowed) {
-            if (autoTradingEnabled) {
-                logEvent({
-                    type: 'INFO',
-                    symbol: selectedSymbol,
-                    message: '[SINGLE] Auto-trade skipped: prerequisites not met (connection, TP/SL, or risk)'
-                });
-            }
-            return;
-        }
+    // Single-symbol auto-trade: run on interval with per-symbol cooldown (avoid flooding Binance)
+    const SINGLE_SYMBOL_INTERVAL_MS = 30000;
+    const SINGLE_SYMBOL_COOLDOWN_MS = 60000;
+    const singleSymbolDataRef = React.useRef({
+        recommendation: null as typeof recommendation,
+        prices: {} as typeof prices,
+        openTrades: [] as TradeRecord[],
+        tpslData: null as typeof tpslData,
+        riskStatus: null as RiskStatus | null,
+        selectedSymbol: '',
+        tradeDirection: 'BUY' as 'BUY' | 'SELL',
+        useTvGuardrail: false,
+        tradingViewConsensus: null as typeof tradingViewConsensus
+    });
+    const lastOrderAttemptRef = React.useRef<Record<string, number>>({});
 
-        let effectiveAction: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
-        let effectiveConfidence: number;
-
-        if (useTvGuardrail) {
-            if (!tradingViewConsensus || (tradingViewConsensus !== 'STRONG BUY' && tradingViewConsensus !== 'STRONG SELL')) {
-                logEvent({
-                    type: 'INFO',
-                    symbol: selectedSymbol,
-                    message: tradingViewConsensus
-                        ? `[SINGLE] Auto-trade skipped: TradingView guardrail on but signal is not Strong Buy/Strong Sell (got ${tradingViewConsensus})`
-                        : '[SINGLE] Auto-trade skipped: TradingView guardrail on but TradingView signal not set'
-                });
-                return;
-            }
-            effectiveAction = tradingViewConsensus;
-            effectiveConfidence = 100;
-        } else {
-            const strength = isStrongEnough(recommendation.action, recommendation.confidence);
-            if (!strength.ok) {
-                logEvent({
-                    type: 'INFO',
-                    symbol: selectedSymbol,
-                    message: `[SINGLE] Auto-trade skipped: signal not strong enough (${recommendation.action}, ${recommendation.confidence}% < ${strength.threshold}%)`
-                });
-                return;
-            }
-            effectiveAction = recommendation.action;
-            effectiveConfidence = recommendation.confidence;
-        }
-
-        // Check if we already have a position in this symbol
-        if (openTrades.some(t => t.symbol === selectedSymbol)) {
-            logEvent({
-                type: 'INFO',
-                symbol: selectedSymbol,
-                message: '[SINGLE] Auto-trade skipped: already have open position in symbol'
-            });
-            return;
-        }
-
-        // Determine trade direction from signal
-        const signalSide = effectiveAction.includes('BUY') ? 'BUY' : 'SELL';
-
-        // Only trade if signal matches our selected direction
-        if ((signalSide === 'BUY' && tradeDirection !== 'BUY') ||
-            (signalSide === 'SELL' && tradeDirection !== 'SELL')) {
-            logEvent({
-                type: 'INFO',
-                symbol: selectedSymbol,
-                message: `[SINGLE] Auto-trade skipped: signal side ${signalSide} does not match selected direction ${tradeDirection}`
-            });
-            return;
-        }
-
-        // Calculate quantity based on max position size
-        const currentPrice = prices[selectedSymbol]?.price;
-        if (!currentPrice) return;
-
-        const quantity = (riskStatus.maxPositionSize / currentPrice);
-
-        console.log(`Auto-executing ${signalSide} trade for ${selectedSymbol}`);
-        logEvent({
-            type: 'INFO',
-            symbol: selectedSymbol,
-            message: `[SINGLE] Placing ${signalSide} order, qty ≈ ${quantity.toFixed(6)} based on max position size ${riskStatus.maxPositionSize}`
-        });
-
-        // Send signal alert before placing order (with TP/SL data)
-        sendSignalAlert(
+    React.useEffect(() => {
+        singleSymbolDataRef.current = {
+            recommendation,
+            prices,
+            openTrades,
+            tpslData,
+            riskStatus,
             selectedSymbol,
-            effectiveAction,
-            effectiveConfidence,
-            currentPrice,
-            `Auto-trade triggered: ${effectiveAction} signal with ${effectiveConfidence}% confidence`,
-            tpslData ? {
-                entry: currentPrice,
-                tp1: tpslData.tp1,
-                tp2: tpslData.tp2,
-                sl: tpslData.sl,
-                rr: tpslData.rr,
-                direction: tpslData.direction
-            } : undefined
-        );
+            tradeDirection,
+            useTvGuardrail,
+            tradingViewConsensus
+        };
+    }, [recommendation, prices, openTrades, tpslData, riskStatus, selectedSymbol, tradeDirection, useTvGuardrail, tradingViewConsensus]);
 
-        placeOrder({
-            symbol: selectedSymbol,
-            side: signalSide,
-            quantity,
-            stopLoss: tpslData.sl,
-            takeProfit: tpslData.tp2
-        }).catch(error => {
-            console.error('Auto-trade failed:', error);
+    useEffect(() => {
+        if (!autoTradingEnabled || !isConnected) return;
+
+        const run = () => {
+            const d = singleSymbolDataRef.current;
+            if (!d.tpslData || !d.riskStatus?.tradingAllowed) {
+                if (autoTradingEnabled) {
+                    logEvent({ type: 'INFO', symbol: d.selectedSymbol, message: '[SINGLE] Auto-trade skipped: prerequisites not met (connection, TP/SL, or risk)' });
+                }
+                return;
+            }
+
+            let effectiveAction: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL';
+            let effectiveConfidence: number;
+
+            if (d.useTvGuardrail) {
+                if (!d.tradingViewConsensus || (d.tradingViewConsensus !== 'STRONG BUY' && d.tradingViewConsensus !== 'STRONG SELL')) {
+                    logEvent({
+                        type: 'INFO',
+                        symbol: d.selectedSymbol,
+                        message: d.tradingViewConsensus
+                            ? `[SINGLE] Auto-trade skipped: TradingView guardrail on but signal is not Strong Buy/Strong Sell (got ${d.tradingViewConsensus})`
+                            : '[SINGLE] Auto-trade skipped: TradingView guardrail on but TradingView signal not set'
+                    });
+                    return;
+                }
+                effectiveAction = d.tradingViewConsensus;
+                effectiveConfidence = 100;
+            } else {
+                if (!d.recommendation) return;
+                const strength = isStrongEnough(d.recommendation.action, d.recommendation.confidence);
+                if (!strength.ok) {
+                    logEvent({
+                        type: 'INFO',
+                        symbol: d.selectedSymbol,
+                        message: `[SINGLE] Auto-trade skipped: signal not strong enough (${d.recommendation.action}, ${d.recommendation.confidence}% < ${strength.threshold}%)`
+                    });
+                    return;
+                }
+                effectiveAction = d.recommendation.action;
+                effectiveConfidence = d.recommendation.confidence;
+            }
+
+            if (d.openTrades.some(t => t.symbol === d.selectedSymbol)) {
+                logEvent({ type: 'INFO', symbol: d.selectedSymbol, message: '[SINGLE] Auto-trade skipped: already have open position in symbol' });
+                return;
+            }
+
+            const now = Date.now();
+            const lastAttempt = lastOrderAttemptRef.current[d.selectedSymbol] ?? 0;
+            if (now - lastAttempt < SINGLE_SYMBOL_COOLDOWN_MS) {
+                logEvent({ type: 'INFO', symbol: d.selectedSymbol, message: `[SINGLE] Auto-trade skipped: cooldown (${Math.ceil((SINGLE_SYMBOL_COOLDOWN_MS - (now - lastAttempt)) / 1000)}s remaining)` });
+                return;
+            }
+
+            const signalSide = effectiveAction.includes('BUY') ? 'BUY' : 'SELL';
+            if ((signalSide === 'BUY' && d.tradeDirection !== 'BUY') || (signalSide === 'SELL' && d.tradeDirection !== 'SELL')) {
+                logEvent({
+                    type: 'INFO',
+                    symbol: d.selectedSymbol,
+                    message: `[SINGLE] Auto-trade skipped: signal side ${signalSide} does not match selected direction ${d.tradeDirection}`
+                });
+                return;
+            }
+
+            const currentPrice = d.prices[d.selectedSymbol]?.price;
+            if (!currentPrice) return;
+
+            const quantity = d.riskStatus!.maxPositionSize / currentPrice;
+            lastOrderAttemptRef.current[d.selectedSymbol] = now;
+
+            console.log(`Auto-executing ${signalSide} trade for ${d.selectedSymbol}`);
             logEvent({
-                type: 'ERROR',
-                symbol: selectedSymbol,
-                message: '[SINGLE] Auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+                type: 'INFO',
+                symbol: d.selectedSymbol,
+                message: `[SINGLE] Placing ${signalSide} order, qty ≈ ${quantity.toFixed(6)} based on max position size ${d.riskStatus!.maxPositionSize}`
             });
-        });
 
-    }, [
-        autoTradingEnabled,
-        isConnected,
-        recommendation,
-        selectedSymbol,
-        tpslData,
-        riskStatus,
-        openTrades,
-        prices,
-        tradeDirection,
-        minSignalStrength,
-        placeOrder,
-        logEvent,
-        sendSignalAlert,
-        isStrongEnough,
-        useTvGuardrail,
-        tradingViewConsensus
-    ]);
+            sendSignalAlert(
+                d.selectedSymbol,
+                effectiveAction,
+                effectiveConfidence,
+                currentPrice,
+                `Auto-trade triggered: ${effectiveAction} signal with ${effectiveConfidence}% confidence`,
+                d.tpslData ? {
+                    entry: currentPrice,
+                    tp1: d.tpslData.tp1,
+                    tp2: d.tpslData.tp2,
+                    sl: d.tpslData.sl,
+                    rr: d.tpslData.rr,
+                    direction: d.tpslData.direction
+                } : undefined
+            );
+
+            placeOrder({
+                symbol: d.selectedSymbol,
+                side: signalSide,
+                quantity,
+                stopLoss: d.tpslData?.sl,
+                takeProfit: d.tpslData?.tp2
+            }).catch(error => {
+                console.error('Auto-trade failed:', error);
+                logEvent({
+                    type: 'ERROR',
+                    symbol: d.selectedSymbol,
+                    message: '[SINGLE] Auto-trade failed: ' + (error instanceof Error ? error.message : String(error))
+                });
+            });
+        };
+
+        run();
+        const interval = setInterval(run, SINGLE_SYMBOL_INTERVAL_MS);
+        return () => clearInterval(interval);
+    }, [autoTradingEnabled, isConnected, placeOrder, logEvent, sendSignalAlert, isStrongEnough]);
 
     // Multi-symbol auto-trade loop using per-symbol signals
     useEffect(() => {

@@ -5,10 +5,10 @@ const dotenv = require('dotenv');
 const { BinanceService } = require('./binanceService.cjs');
 const { RiskManager } = require('./riskManager.cjs');
 const { TelegramBotService } = require('./telegramBot.cjs');
+const db = require('./db.cjs');
 
 // Load env from project root
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -16,16 +16,25 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Initialize services
-const binance = new BinanceService();
-const riskManager = new RiskManager();
-const telegramBot = new TelegramBotService();
+let binance;
+let riskManager;
+let telegramBot;
 
-// Setup Telegram bot commands if enabled
-if (telegramBot.isEnabled()) {
-    telegramBot.setupCommands(riskManager, binance);
-    // Message is logged inside setupCommands based on enableCommands flag
-}
+async function start() {
+    await db.init();
+    const persistedSettings = db.getSettings();
+    const riskOptions = {};
+    if (persistedSettings.maxPositionSize != null) riskOptions.maxPositionSize = Number(persistedSettings.maxPositionSize);
+    if (persistedSettings.dailyLossLimit != null) riskOptions.dailyLossLimit = Number(persistedSettings.dailyLossLimit);
+    if (persistedSettings.maxOpenTrades != null) riskOptions.maxOpenTrades = Number(persistedSettings.maxOpenTrades);
+
+    binance = new BinanceService();
+    riskManager = new RiskManager(riskOptions);
+    telegramBot = new TelegramBotService();
+
+    if (telegramBot.isEnabled()) {
+        telegramBot.setupCommands(riskManager, binance);
+    }
 
 // Health check
 app.get('/health', (req, res) => {
@@ -53,9 +62,19 @@ app.get('/api/positions', async (req, res) => {
 });
 
 // Place a new order
+const ORDER_COOLDOWN_MS = 60000;
+
 app.post('/api/order', async (req, res) => {
     try {
-        const { symbol, side, quantity, type = 'MARKET', price, stopLoss, takeProfit } = req.body;
+        const { symbol, side, quantity, type = 'MARKET', price, stopLoss, takeProfit, source } = req.body;
+
+        if (db.hasOpenTradeInDb(symbol)) {
+            return res.status(400).json({ error: `Already have open position in ${symbol} (from DB)` });
+        }
+        const lastOrder = db.getLastOrderAttemptInDb(symbol, ORDER_COOLDOWN_MS);
+        if (lastOrder) {
+            return res.status(400).json({ error: `Order cooldown for ${symbol}; try again after ${Math.ceil(ORDER_COOLDOWN_MS / 1000)}s` });
+        }
 
         // Risk checks
         const riskCheck = await riskManager.checkOrderAllowed({
@@ -106,6 +125,16 @@ app.post('/api/order', async (req, res) => {
             orderId: order.orderId
         });
 
+        db.recordTradeInDb({
+            symbol,
+            side,
+            quantity: executedQuantity,
+            price: parseFloat(executedPrice) || 0,
+            orderId: String(order.orderId),
+            timestamp: Date.now(),
+            source: source || 'single'
+        });
+
         // Send Telegram notification
         if (telegramBot.isEnabled()) {
             telegramBot.sendTradeExecution(
@@ -140,6 +169,7 @@ app.post('/api/kill-switch', async (req, res) => {
     try {
         const result = await binance.emergencyCloseAll();
         binance.invalidateAccountCache();
+        db.closeAllTradesInDb();
         riskManager.activateKillSwitch();
         
         // Send Telegram notification
@@ -164,6 +194,31 @@ app.get('/api/risk-status', (req, res) => {
 app.post('/api/risk-reset', (req, res) => {
     riskManager.resetDaily();
     res.json({ success: true });
+});
+
+// Get persisted settings (from DB)
+app.get('/api/settings', (req, res) => {
+    res.json(db.getSettings());
+});
+
+// Update settings (persist to DB and update risk manager)
+app.patch('/api/settings', (req, res) => {
+    const { maxPositionSize, dailyLossLimit, maxOpenTrades } = req.body;
+    const updates = {};
+    if (maxPositionSize != null) {
+        updates.maxPositionSize = Number(maxPositionSize);
+        db.setSetting('maxPositionSize', updates.maxPositionSize);
+    }
+    if (dailyLossLimit != null) {
+        updates.dailyLossLimit = Number(dailyLossLimit);
+        db.setSetting('dailyLossLimit', updates.dailyLossLimit);
+    }
+    if (maxOpenTrades != null) {
+        updates.maxOpenTrades = Math.max(0, Math.floor(Number(maxOpenTrades)));
+        db.setSetting('maxOpenTrades', updates.maxOpenTrades);
+    }
+    if (Object.keys(updates).length) riskManager.updateSettings(updates);
+    res.json(db.getSettings());
 });
 
 // Get trade history
@@ -195,6 +250,7 @@ app.post('/api/telegram/signal', async (req, res) => {
         if (telegramBot.isEnabled()) {
             await telegramBot.sendSignal(symbol, action, confidence, price, reason, tpSlData);
             lastTelegramSignalByKey.set(dedupeKey, now);
+            db.recordSignal(symbol, action, confidence || 0, price, true);
             res.json({ success: true, message: 'Signal sent to Telegram' });
         } else {
             res.json({ success: false, message: 'Telegram bot not configured' });
@@ -205,14 +261,23 @@ app.post('/api/telegram/signal', async (req, res) => {
     }
 });
 
-// Get open trades - syncs tracked trades with actual Binance balances
+// Get open trades - syncs tracked trades with actual Binance balances; falls back to DB when Binance fails (e.g. rate limit)
 app.get('/api/open-trades', async (req, res) => {
     try {
-        // Get locally tracked trades
-        const localTrades = riskManager.getOpenTrades();
+        const dbTrades = db.getOpenTradesFromDb();
+        const memoryTrades = riskManager.getOpenTrades();
+        const bySymbol = new Map();
+        dbTrades.forEach(t => bySymbol.set(t.symbol, { ...t }));
+        memoryTrades.forEach(t => bySymbol.set(t.symbol, { ...t }));
+        const localTrades = Array.from(bySymbol.values());
 
-        // Get actual positions from Binance (account balances)
-        const positions = await binance.getOpenPositions();
+        let positions;
+        try {
+            positions = await binance.getOpenPositions();
+        } catch (binanceError) {
+            console.warn('Binance getOpenPositions failed, returning DB/memory open trades:', binanceError.message);
+            return res.json(localTrades);
+        }
 
         // Create a map of Binance balances by symbol (include all assets with balance > 0.001, exclude USDT/stablecoins)
         const excludedAssets = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP'];
@@ -265,7 +330,13 @@ app.get('/api/open-trades', async (req, res) => {
 });
 
 
-app.listen(PORT, () => {
-    console.log(`Trading server running on port ${PORT}`);
-    console.log(`Mode: ${binance.isTestnet() ? 'TESTNET' : 'PRODUCTION'}`);
+    app.listen(PORT, () => {
+        console.log(`Trading server running on port ${PORT}`);
+        console.log(`Mode: ${binance.isTestnet() ? 'TESTNET' : 'PRODUCTION'}`);
+    });
+}
+
+start().catch(err => {
+    console.error('Server failed to start:', err);
+    process.exit(1);
 });
