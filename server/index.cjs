@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
-const { BinanceService } = require('./binanceService.cjs');
+const { BinanceFuturesService } = require('./binanceFuturesService.cjs');
 const { RiskManager } = require('./riskManager.cjs');
 const { TelegramBotService } = require('./telegramBot.cjs');
 const db = require('./db.cjs');
@@ -28,7 +28,8 @@ async function start() {
     if (persistedSettings.dailyLossLimit != null) riskOptions.dailyLossLimit = Number(persistedSettings.dailyLossLimit);
     if (persistedSettings.maxOpenTrades != null) riskOptions.maxOpenTrades = Number(persistedSettings.maxOpenTrades);
 
-    binance = new BinanceService();
+    // Use USDT-M futures adapter (testnet or mainnet based on .env)
+    binance = new BinanceFuturesService();
     riskManager = new RiskManager(riskOptions);
     telegramBot = new TelegramBotService();
 
@@ -36,9 +37,15 @@ async function start() {
         telegramBot.setupCommands(riskManager, binance);
     }
 
-// Health check
+// Health check (includes DB readability)
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', testnet: binance.isTestnet() });
+    let dbStatus = 'ok';
+    try {
+        db.getSettings();
+    } catch (err) {
+        dbStatus = 'error';
+    }
+    res.json({ status: 'ok', testnet: binance.isTestnet(), db: dbStatus });
 });
 
 // Get account info
@@ -51,7 +58,7 @@ app.get('/api/account', async (req, res) => {
     }
 });
 
-// Get current positions
+// Get current positions (normalized futures positions)
 app.get('/api/positions', async (req, res) => {
     try {
         const positions = await binance.getOpenPositions();
@@ -91,10 +98,10 @@ app.post('/api/order', async (req, res) => {
 
         console.log(`Executing ${side} order for ${symbol}...`);
 
-        // Place main order
+        // Place main order (futures)
         const order = await binance.placeOrder({
             symbol,
-            side,
+            side, // BUY = open long, SELL = open short in one-way mode
             type,
             quantity: riskCheck.adjustedQuantity || quantity,
             price
@@ -103,14 +110,13 @@ app.post('/api/order', async (req, res) => {
         console.log(`Main order placed successfully:`, order.orderId);
         binance.invalidateAccountCache();
 
-        // Place stop-loss if provided
+        // Place stop-loss / take-profit if provided
         if (stopLoss && order.orderId) {
-            await binance.placeStopLoss(symbol, side === 'BUY' ? 'SELL' : 'BUY', quantity, stopLoss);
+            await binance.placeStopLoss(symbol, side === 'BUY' ? 'SELL' : 'BUY', riskCheck.adjustedQuantity || quantity, stopLoss);
         }
 
-        // Place take-profit if provided
         if (takeProfit && order.orderId) {
-            await binance.placeTakeProfit(symbol, side === 'BUY' ? 'SELL' : 'BUY', quantity, takeProfit);
+            await binance.placeTakeProfit(symbol, side === 'BUY' ? 'SELL' : 'BUY', riskCheck.adjustedQuantity || quantity, takeProfit);
         }
 
         // Track the trade
@@ -160,6 +166,47 @@ app.delete('/api/orders/:symbol', async (req, res) => {
         const result = await binance.cancelAllOrders(symbol);
         res.json(result);
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Close a single futures position by symbol (e.g. BTCUSDT); updates DB so cooldown/open-trade checks stay correct
+app.post('/api/close-position', async (req, res) => {
+    try {
+        const { symbol } = req.body;
+        if (!symbol || typeof symbol !== 'string') {
+            return res.status(400).json({ error: 'Missing or invalid symbol' });
+        }
+        if (!symbol.endsWith('USDT')) {
+            return res.status(400).json({ error: 'Symbol must be a USDT pair (e.g. BTCUSDT)' });
+        }
+        const positions = await binance.getOpenPositions();
+        const position = positions.find((p) => p.symbol === symbol);
+        if (!position) {
+            return res.status(404).json({ error: `No open position for ${symbol}` });
+        }
+
+        // Close via reduce-only market order for the full size
+        const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
+
+        await binance.cancelAllOrders(symbol).catch(() => {});
+        const order = await binance.placeOrder({
+            symbol,
+            side: closeSide,
+            type: 'MARKET',
+            quantity: position.quantity,
+            reduceOnly: true
+        });
+
+        const exitPrice = order.fills?.[0]?.price
+            ? parseFloat(order.fills[0].price)
+            : await binance.getCurrentPrice(symbol);
+        riskManager.closeTrade(symbol, exitPrice);
+        db.closeTradeInDb(symbol);
+        binance.invalidateAccountCache();
+        res.json(order);
+    } catch (error) {
+        console.error('Close position error:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -226,8 +273,8 @@ app.get('/api/trades', (req, res) => {
     res.json(riskManager.getTradeHistory());
 });
 
-// Dedupe Telegram signals: same symbol+action within cooldown = skip send
-const TELEGRAM_SIGNAL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+// Dedupe Telegram signals: same symbol+action within cooldown = skip send (limit: one signal per symbol+action per cooldown)
+const TELEGRAM_SIGNAL_COOLDOWN_MS = parseInt(process.env.TELEGRAM_SIGNAL_COOLDOWN_MS || '', 10) || 5 * 60 * 1000; // default 5 min
 const lastTelegramSignalByKey = new Map(); // key = `${symbol}:${action}`
 
 // Send signal alert via Telegram
@@ -261,7 +308,7 @@ app.post('/api/telegram/signal', async (req, res) => {
     }
 });
 
-// Get open trades - syncs tracked trades with actual Binance balances; falls back to DB when Binance fails (e.g. rate limit)
+// Get open trades - syncs tracked trades with actual Binance futures positions; falls back to DB when Binance fails
 app.get('/api/open-trades', async (req, res) => {
     try {
         const dbTrades = db.getOpenTradesFromDb();
@@ -279,53 +326,58 @@ app.get('/api/open-trades', async (req, res) => {
             return res.json(localTrades);
         }
 
-        // Create a map of Binance balances by symbol (include all assets with balance > 0.001, exclude USDT/stablecoins)
-        const excludedAssets = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP'];
-        const balanceMap = new Map();
-        positions.forEach(pos => {
-            const asset = pos.asset;
-            const total = parseFloat(pos.free) + parseFloat(pos.locked);
-            if (total > 0.001 && !excludedAssets.includes(asset)) {
-                balanceMap.set(`${asset}USDT`, total);
-            }
+        // Map futures positions by symbol
+        const positionMap = new Map();
+        positions.forEach((pos) => {
+            positionMap.set(pos.symbol, pos);
         });
 
-        // Sync local trades with actual balances
-        const syncedTrades = localTrades.map(trade => {
-            const actualBalance = balanceMap.get(trade.symbol);
-            if (actualBalance !== undefined) {
-                // Update quantity to match actual balance
-                balanceMap.delete(trade.symbol); // Remove from map so we don't show it twice
+        // Sync local trades with actual futures positions
+        const syncedTrades = localTrades.map((trade) => {
+            const pos = positionMap.get(trade.symbol);
+            if (pos) {
+                // Update quantity to match actual futures position size
+                positionMap.delete(trade.symbol);
                 return {
                     ...trade,
-                    quantity: actualBalance,
+                    quantity: pos.quantity,
+                    side: pos.side === 'LONG' ? 'BUY' : 'SELL',
                     synced: true
                 };
             }
             return trade;
-        }).filter(trade => {
-            // Keep synced trades (still on Binance) or local trades that still have balance
+        }).filter((trade) => {
+            // Keep synced trades (still on Binance) or local trades that we still track
             if (trade.synced) return true;
-            const actualBalance = balanceMap.get(trade.symbol);
-            return actualBalance !== undefined && actualBalance > 0;
+            const pos = positionMap.get(trade.symbol);
+            return !!pos;
         });
 
-        // Add any remaining balances that aren't being tracked
-        const untrackedPositions = Array.from(balanceMap.entries()).map(([symbol, quantity]) => ({
-            symbol,
-            side: 'BUY',
-            quantity,
-            price: 0, // Unknown entry price
-            orderId: `balance-${symbol.replace('USDT', '')}`,
+        // Add any remaining positions that aren't being tracked locally
+        const untrackedPositions = Array.from(positionMap.values()).map((pos) => ({
+            symbol: pos.symbol,
+            side: pos.side === 'LONG' ? 'BUY' : 'SELL',
+            quantity: pos.quantity,
+            price: pos.entryPrice,
+            orderId: `position-${pos.symbol}`,
             timestamp: Date.now(),
-            isBalance: true
+            isPosition: true
         }));
 
         res.json([...syncedTrades, ...untrackedPositions]);
     } catch (error) {
         console.error('Error fetching open trades:', error.message);
-        // Fallback to just local trades if Binance API fails
-        res.json(riskManager.getOpenTrades());
+        // Fallback to merged DB + memory so DB-backed trades are still included
+        try {
+            const dbTrades = db.getOpenTradesFromDb();
+            const memoryTrades = riskManager.getOpenTrades();
+            const bySymbol = new Map();
+            dbTrades.forEach(t => bySymbol.set(t.symbol, { ...t }));
+            memoryTrades.forEach(t => bySymbol.set(t.symbol, { ...t }));
+            return res.json(Array.from(bySymbol.values()));
+        } catch (fallbackErr) {
+            res.json(riskManager.getOpenTrades());
+        }
     }
 });
 
@@ -334,6 +386,12 @@ app.get('/api/open-trades', async (req, res) => {
         console.log(`Trading server running on port ${PORT}`);
         console.log(`Mode: ${binance.isTestnet() ? 'TESTNET' : 'PRODUCTION'}`);
     });
+
+    function shutdown() {
+        if (telegramBot) telegramBot.stopPolling();
+    }
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 }
 
 start().catch(err => {

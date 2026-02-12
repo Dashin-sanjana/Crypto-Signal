@@ -19,12 +19,27 @@ class TelegramBotService {
         this._sendQueue = [];
         this._processingQueue = false;
 
+        this._pollingStoppedDueTo409 = false;
+
         if (this.token && this.chatId) {
             try {
-                this.bot = new TelegramBot(this.token, { polling: this.enableCommands });
+                this.bot = new TelegramBot(this.token, { polling: false });
                 this.enabled = true;
                 const mode = this.enableCommands ? 'with commands' : 'signals only';
                 console.log(`Telegram bot initialized (${mode} mode, min interval ${this._minIntervalMs}ms)`);
+
+                this.bot.on('polling_error', (err) => {
+                    const msg = err.message || String(err);
+                    if (msg.includes('409') || msg.includes('Conflict')) {
+                        if (!this._pollingStoppedDueTo409) {
+                            this._pollingStoppedDueTo409 = true;
+                            try { this.bot.stopPolling(); } catch (_) {}
+                            console.warn('[Telegram] 409 Conflict: Another bot instance is already polling. Only ONE server process may run with TELEGRAM_ENABLE_COMMANDS=true. This process will still send signal/trade messages but will not receive /commands.');
+                        }
+                    } else {
+                        console.error('[Telegram] polling_error:', msg);
+                    }
+                });
             } catch (error) {
                 console.error('Failed to initialize Telegram bot:', error.message);
                 this.enabled = false;
@@ -434,10 +449,31 @@ Welcome! Use the following commands:
             `.trim(), { parse_mode: 'HTML' });
         });
 
-        // Enable polling (only if commands are enabled)
+        // Enable polling only if commands are enabled. Only one process per bot token may poll.
         if (this.enableCommands) {
-            this.bot.startPolling();
-            console.log('Telegram bot commands registered and polling started');
+            this.bot.startPolling().catch((err) => {
+                const msg = err.message || String(err);
+                if (msg.includes('409') || msg.includes('Conflict')) {
+                    console.warn('[Telegram] 409 Conflict: Only one server instance may run with TELEGRAM_ENABLE_COMMANDS=true. Stop other instances (e.g. second terminal or duplicate npm run start).');
+                } else {
+                    console.error('[Telegram] startPolling failed:', msg);
+                }
+            });
+            console.log('Telegram bot commands registered and polling started (ensure only ONE server process is running)');
+        }
+    }
+
+    /**
+     * Call from process shutdown (SIGINT/SIGTERM) to release the polling connection so restarts don't get 409.
+     */
+    stopPolling() {
+        if (this.bot && this.enableCommands) {
+            try {
+                this.bot.stopPolling();
+                console.log('[Telegram] Polling stopped');
+            } catch (e) {
+                // ignore
+            }
         }
     }
 

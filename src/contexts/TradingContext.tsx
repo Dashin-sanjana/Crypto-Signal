@@ -503,7 +503,9 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
                 placeOrder({
                     symbol,
                     side: signalSide,
-                    quantity
+                    quantity,
+                    stopLoss: sl,
+                    takeProfit: tp2
                 }).catch(error => {
                     logEvent({
                         type: 'ERROR',

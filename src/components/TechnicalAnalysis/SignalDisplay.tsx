@@ -1,5 +1,7 @@
 import React from 'react';
 import { usePriceContext } from '../../contexts/PriceContext';
+import { useTradingContext } from '../../contexts/TradingContext';
+import { useSignalContext } from '../../contexts/SignalContext';
 import { formatPrice } from '../../utils/helpers';
 import styles from './SignalDisplay.module.css';
 
@@ -12,8 +14,11 @@ const SignalDisplay: React.FC = () => {
     recommendation,
     indicatorStatus,
     useTvGuardrail,
-    tradingViewConsensus
+    tradingViewConsensus,
+    prices
   } = usePriceContext();
+  const { placeOrder, riskStatus, isConnected } = useTradingContext();
+  const { addSignal } = useSignalContext();
 
   const tvDrivingSignal = useTvGuardrail && (tradingViewConsensus === 'STRONG BUY' || tradingViewConsensus === 'STRONG SELL');
   const tvNotSet = useTvGuardrail && !tradingViewConsensus;
@@ -153,17 +158,58 @@ const SignalDisplay: React.FC = () => {
         
         <button 
           className={`${styles.actionBtn} ${isBuy ? styles.btnBuy : styles.btnSell}`}
-          onClick={() => {
-            // Visual feedback for live entry
-            const btn = document.activeElement as HTMLElement;
-            if (btn) {
-              const originalText = btn.innerHTML;
-              btn.innerHTML = '✅ ENTRY SENT';
-              btn.style.filter = 'brightness(1.5)';
-              setTimeout(() => {
-                btn.innerHTML = originalText;
-                btn.style.filter = '';
-              }, 1500);
+          onClick={async () => {
+            if (!isConnected || !riskStatus?.tradingAllowed) {
+              console.warn('[SignalDisplay] Trade blocked: backend not connected or trading not allowed');
+              return;
+            }
+
+            const currentPrice = prices[selectedSymbol]?.price || entry;
+            if (!currentPrice || currentPrice <= 0) {
+              console.warn('[SignalDisplay] No current price available for', selectedSymbol);
+              return;
+            }
+
+            // Compute quantity using risk manager max position size (spot-style sizing adapted for futures)
+            const quantity = riskStatus.maxPositionSize / currentPrice;
+
+            // Register this setup as a unified signal for tracking
+            addSignal({
+              type: isBuy ? 'LONG' : 'SHORT',
+              symbol: selectedSymbol,
+              entry,
+              stopLoss: sl,
+              takeProfit: tp2,
+              strength: Math.round(recommendation.confidence),
+              confluence: {
+                technicalAnalysis: true,
+                tvGuardrail: useTvGuardrail,
+                tvStrong: tradingViewConsensus === 'STRONG BUY' || tradingViewConsensus === 'STRONG SELL'
+              }
+            });
+
+            try {
+              await placeOrder({
+                symbol: selectedSymbol,
+                side: isBuy ? 'BUY' : 'SELL',
+                quantity,
+                stopLoss: sl,
+                takeProfit: tp2
+              });
+
+              // Visual feedback for live entry
+              const btn = document.activeElement as HTMLElement | null;
+              if (btn) {
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✅ ENTRY SENT';
+                btn.style.filter = 'brightness(1.5)';
+                setTimeout(() => {
+                  btn.innerHTML = originalText;
+                  btn.style.filter = '';
+                }, 1500);
+              }
+            } catch (error) {
+              console.error('[SignalDisplay] Manual trade failed:', error);
             }
           }}
         >

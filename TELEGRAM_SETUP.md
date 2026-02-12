@@ -31,6 +31,12 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 ```
 
+Optional:
+
+- `TELEGRAM_ENABLE_COMMANDS=true` – enable `/status`, `/kill_switch`, etc. (only one server process may run; see Troubleshooting).
+- `TELEGRAM_SIGNAL_COOLDOWN_MS=300000` – min time (ms) between sending the same symbol+action signal (default: 300000 = 5 min).
+- `TELEGRAM_MIN_INTERVAL_MS=2000` – min time (ms) between any two messages (default: 2000; reduces rate-limit errors).
+
 ### 4. Restart the Server
 
 Restart your Node.js server for the changes to take effect:
@@ -67,7 +73,18 @@ The bot will automatically send notifications for:
 - Keep your bot token secret - never commit it to version control
 - The `.env` file is already in `.gitignore` for security
 
+## Signal limits
+
+- **Per signal type**: The same symbol+action (e.g. `BTCUSDT:BUY`) is only sent once per cooldown (default 5 min). Configure with `TELEGRAM_SIGNAL_COOLDOWN_MS`.
+- **Send rate**: Messages are queued and sent with a minimum interval (default 2 s) to avoid Telegram rate limits. Configure with `TELEGRAM_MIN_INTERVAL_MS`.
+- **Queue**: Up to 15 messages are queued; older ones are dropped if the queue is full.
+
 ## Troubleshooting
+
+**409 Conflict: "terminated by other getUpdates request"**
+- Telegram allows only **one** active polling connection per bot token. This error means more than one server process is running (e.g. two terminals with `npm run server`, or `npm run start` plus a separate server).
+- **Fix**: Run only one server process. Stop any duplicate (second terminal, PM2 worker, or dev script that also starts the server). If you use `TELEGRAM_ENABLE_COMMANDS=true`, keep commands in a single process; the app will still send signals/trades from that process.
+- On shutdown, the server stops polling so a restart can take over without 409.
 
 **Bot not responding?**
 - Check that `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set correctly in `.env`
@@ -75,9 +92,9 @@ The bot will automatically send notifications for:
 - Ensure your bot token is valid (test by visiting the getUpdates URL)
 
 **Commands not working?**
+- Set `TELEGRAM_ENABLE_COMMANDS=true` and restart. Ensure only one server instance is running (see 409 above).
 - Make sure you're messaging from the chat ID configured in `.env`
 - Check server logs for error messages
-- Verify the bot is running and polling is enabled (check server startup logs)
 
 **Not receiving notifications?**
 - Verify the bot is enabled (check server logs for "Telegram bot initialized")

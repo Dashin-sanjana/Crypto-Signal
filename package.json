@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "server": "node server/index.cjs",
     "server:dev": "nodemon server/index.cjs",
-    "start": "concurrently \"npm run dev\" \"npm run server\""
+    "start": "concurrently \"npm run dev\" \"npm run server\"",
+    "test:place-order": "node test-place-order.cjs",
+    "test:place-order:live": "node test-place-order.cjs --live"
   },
   "dependencies": {
     "cors": "^2.8.5",
